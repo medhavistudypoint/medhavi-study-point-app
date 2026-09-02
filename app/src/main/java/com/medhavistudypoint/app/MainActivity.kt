@@ -86,6 +86,7 @@ fun MedhaviHomeScreen() {
         BottomItem("⌂", "Home"),
         BottomItem("▶", "Courses"),
         BottomItem("✓", "Tests"),
+        BottomItem(icon = "🎥", title = "Classes"),
         BottomItem("●", "Profile")
     )
 
@@ -121,7 +122,24 @@ fun MedhaviHomeScreen() {
             }
         }
     ) { innerPadding ->
-        HomeContent(innerPadding)
+
+        when (selectedTab) {
+            0 -> HomeContent(innerPadding)
+
+            else -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${bottomItems[selectedTab].title} Screen",
+                    color = NavyBlue,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }
 
