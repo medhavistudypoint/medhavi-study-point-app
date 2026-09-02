@@ -130,23 +130,29 @@ private fun HomeContent(innerPadding: PaddingValues) {
     val services = listOf(
         HomeService(
             icon = "📝",
-            title = "Online Tests",
+            title = "Free Online Tests",
             subtitle = "मॉक टेस्ट सीरीज"
         ),
         HomeService(
             icon = "▶️",
-            title = "Video Classes",
+            title = "Free Video Classes",
             subtitle = "YouTube लेक्चर्स"
         ),
         HomeService(
             icon = "📚",
-            title = "PDF Notes",
+            title = "Free PDF Notes",
             subtitle = "डाउनलोड नोट्स"
         ),
         HomeService(
             icon = "🎯",
             title = "TGT 2026 Batch",
             subtitle = "Home Science + GS",
+            highlighted = true
+        ),
+        HomeService(
+            icon = "🎯",
+            title = "TGT 2026 GS Batch",
+            subtitle = "Complete General Studies",
             highlighted = true
         ),
         HomeService(
