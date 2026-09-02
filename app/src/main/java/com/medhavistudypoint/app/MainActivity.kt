@@ -3,6 +3,7 @@ package com.medhavistudypoint.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -125,6 +126,8 @@ fun MedhaviHomeScreen() {
 
         when (selectedTab) {
             0 -> HomeContent(innerPadding)
+            1 -> CoursesContent(innerPadding)
+            2 -> TestsContent(innerPadding)
 
             else -> Box(
                 modifier = Modifier
@@ -142,7 +145,283 @@ fun MedhaviHomeScreen() {
         }
     }
 }
+@Composable
+private fun TestsContent(innerPadding: PaddingValues) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .padding(innerPadding),
+        contentPadding = PaddingValues(bottom = 24.dp)
+    ) {
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = RoyalBlue,
+                shape = RoundedCornerShape(
+                    bottomStart = 30.dp,
+                    bottomEnd = 30.dp
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = 20.dp,
+                        vertical = 30.dp
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "🎯 TEST PORTAL",
+                        color = Golden,
+                        fontSize = 27.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Free और Batch Tests एक ही स्थान पर",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        item {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = 16.dp,
+                        top = 18.dp,
+                        end = 16.dp
+                    ),
+                color = Color(0xFFEAF7EF),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text = "✓ Free Tests और आपके खरीदे हुए Batch Tests",
+                    modifier = Modifier.padding(15.dp),
+                    color = Color(0xFF16824B),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        item {
+            Text(
+                text = "Test Categories",
+                modifier = Modifier.padding(
+                    start = 18.dp,
+                    top = 24.dp,
+                    end = 18.dp,
+                    bottom = 14.dp
+                ),
+                color = NavyBlue,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                TestPortalCard(
+                    icon = "📝",
+                    title = "Free Online Tests",
+                    subtitle = "सभी विद्यार्थियों के लिए",
+                    status = "FREE",
+                    statusColor = Color(0xFF16824B),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.size(12.dp))
+
+                TestPortalCard(
+                    icon = "📋",
+                    title = "Home Science Daily Tests",
+                    subtitle = "Topic Wise Tests",
+                    status = "BATCH",
+                    statusColor = RoyalBlue,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                TestPortalCard(
+                    icon = "📖",
+                    title = "GS Sectional Tests",
+                    subtitle = "विषयवार टेस्ट सीरीज",
+                    status = "BATCH",
+                    statusColor = RoyalBlue,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.size(12.dp))
+
+                TestPortalCard(
+                    icon = "📚",
+                    title = "Full Mock Tests",
+                    subtitle = "Home Science + GS",
+                    status = "BATCH",
+                    statusColor = RoyalBlue,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TestPortalCard(
+    icon: String,
+    title: String,
+    subtitle: String,
+    status: String,
+    statusColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(190.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 2.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = Color(0xFFE0E4EA)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = icon,
+                fontSize = 34.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = title,
+                color = DarkText,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(5.dp))
+
+            Text(
+                text = subtitle,
+                color = GreyText,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Surface(
+                color = statusColor.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text(
+                    text = status,
+                    modifier = Modifier.padding(
+                        horizontal = 14.dp,
+                        vertical = 6.dp
+                    ),
+                    color = statusColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+@Composable
+private fun CoursesContent(innerPadding: PaddingValues) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .padding(innerPadding),
+        contentPadding = PaddingValues(20.dp)
+    ) {
+        item {
+            Text(
+                text = "Courses",
+                color = NavyBlue,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = "अपनी तैयारी के लिए सही Batch चुनें",
+                color = GreyText,
+                fontSize = 15.sp
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        item {
+            InformationCard(title = "TGT 2026 Complete Batch") {
+                Text(
+                    text = "Home Science + General Studies\nVideo Classes • PDF Notes • Tests",
+                    color = DarkText,
+                    fontSize = 16.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "VIEW COURSE  →",
+                    color = RoyalBlue,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            InformationCard(title = "TGT 2026 Only GS Batch") {
+                Text(
+                    text = "Complete General Studies\n160 Sectional Tests • Full Tests • PDF Notes",
+                    color = DarkText,
+                    fontSize = 16.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "VIEW COURSE  →",
+                    color = RoyalBlue,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun HomeContent(innerPadding: PaddingValues) {
     val services = listOf(
