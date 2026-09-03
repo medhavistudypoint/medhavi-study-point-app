@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -31,10 +32,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +71,7 @@ private const val PAGE_FULL_TESTS = 6
 private const val PAGE_VIDEO_CLASSES = 7
 private const val PAGE_PDF_NOTES = 8
 private const val PAGE_SUBJECT_TESTS = 9
+private const val PAGE_HTML_TEST = 10
 
 data class HomeService(
     val icon: String,
@@ -93,14 +96,16 @@ data class PortalCardData(
 data class PortalListItem(
     val title: String,
     val subtitle: String,
-    val status: String = "OPEN"
+    val status: String = "OPEN",
+    val testUrl: String = ""
 )
 
 data class GsSubject(
     val icon: String,
     val title: String,
     val subtitle: String,
-    val unit: Int
+    val unit: Int,
+    val firebaseKey: String = "polity"
 )
 
 class MainActivity : ComponentActivity() {
@@ -121,6 +126,87 @@ fun MedhaviHomeScreen() {
     var activePage by remember { mutableIntStateOf(PAGE_ROOT) }
     var selectedSubject by remember { mutableStateOf<GsSubject?>(null) }
     val backStack = remember { mutableStateListOf<Int>() }
+    var currentTestTitle by remember { mutableStateOf("Online Test") }
+    var currentTestUrl by remember { mutableStateOf("") }
+
+    // Firebase से लाइव आने वाली सूचियाँ
+    var freeTestsList by remember { mutableStateOf(emptyList<PortalListItem>()) }
+    var homeScienceTestsList by remember { mutableStateOf(emptyList<PortalListItem>()) }
+    var fullMockTestsList by remember { mutableStateOf(emptyList<PortalListItem>()) }
+    var gsTestsMap by remember { mutableStateOf(mapOf<String, List<PortalListItem>>()) }
+
+    // Firebase Realtime Listeners
+    LaunchedEffect(Unit) {
+        val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+
+        // 1. Free Tests
+        database.getReference("free_tests").addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<PortalListItem>()
+                for (child in snapshot.children) {
+                    val title = child.child("title").getValue(String::class.java) ?: ""
+                    val subtitle = child.child("subtitle").getValue(String::class.java) ?: ""
+                    val status = child.child("status").getValue(String::class.java) ?: "LIVE"
+                    val testUrl = child.child("testUrl").getValue(String::class.java) ?: ""
+                    if (title.isNotBlank()) list.add(PortalListItem(title, subtitle, status, testUrl))
+                }
+                if (list.isNotEmpty()) freeTestsList = list
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        })
+
+        // 2. Home Science Daily Tests
+        database.getReference("home_science_tests").addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<PortalListItem>()
+                for (child in snapshot.children) {
+                    val title = child.child("title").getValue(String::class.java) ?: ""
+                    val subtitle = child.child("subtitle").getValue(String::class.java) ?: ""
+                    val status = child.child("status").getValue(String::class.java) ?: "TEST OVER"
+                    val testUrl = child.child("testUrl").getValue(String::class.java) ?: ""
+                    if (title.isNotBlank()) list.add(PortalListItem(title, subtitle, status, testUrl))
+                }
+                if (list.isNotEmpty()) homeScienceTestsList = list
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        })
+
+        // 3. Full Mock Tests
+        database.getReference("full_mock_tests").addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<PortalListItem>()
+                for (child in snapshot.children) {
+                    val title = child.child("title").getValue(String::class.java) ?: ""
+                    val subtitle = child.child("subtitle").getValue(String::class.java) ?: ""
+                    val status = child.child("status").getValue(String::class.java) ?: "COMING SOON"
+                    val testUrl = child.child("testUrl").getValue(String::class.java) ?: ""
+                    if (title.isNotBlank()) list.add(PortalListItem(title, subtitle, status, testUrl))
+                }
+                if (list.isNotEmpty()) fullMockTestsList = list
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        })
+
+        // 4. GS Sectional Tests (सभी 8 विषय)
+        database.getReference("gs_tests").addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val map = mutableMapOf<String, List<PortalListItem>>()
+                for (subjChild in snapshot.children) {
+                    val list = mutableListOf<PortalListItem>()
+                    for (testChild in subjChild.children) {
+                        val title = testChild.child("title").getValue(String::class.java) ?: ""
+                        val subtitle = testChild.child("subtitle").getValue(String::class.java) ?: ""
+                        val status = testChild.child("status").getValue(String::class.java) ?: "COMING SOON"
+                        val testUrl = testChild.child("testUrl").getValue(String::class.java) ?: ""
+                        if (title.isNotBlank()) list.add(PortalListItem(title, subtitle, status, testUrl))
+                    }
+                    map[subjChild.key ?: ""] = list
+                }
+                if (map.isNotEmpty()) gsTestsMap = map
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        })
+    }
 
     val bottomItems = listOf(
         BottomItem("⌂", "Home"),
@@ -146,7 +232,17 @@ fun MedhaviHomeScreen() {
         }
     }
 
-    // हर Back press पर एक ही step पीछे जाएँ। Home पर पहुँचने के बाद ही अगला Back app को बंद करेगा।
+    // यूनिवर्सल टेस्ट क्लिक हैंडलर: सिर्फ LIVE टेस्ट ही खुलेंगे
+    val onUniversalTestClick: (PortalListItem) -> Unit = { item ->
+        val cleanStatus = item.status.trim().uppercase()
+        val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START") && item.testUrl.isNotBlank()
+        if (isLive) {
+            currentTestTitle = item.title
+            currentTestUrl = item.testUrl
+            openPage(PAGE_HTML_TEST)
+        }
+    }
+
     BackHandler(enabled = activePage != PAGE_ROOT || selectedTab != 0) {
         if (activePage != PAGE_ROOT) {
             goBack()
@@ -199,8 +295,24 @@ fun MedhaviHomeScreen() {
                 onBack = { goBack() },
                 onOpenPage = { openPage(it) }
             )
-            PAGE_FREE_TESTS -> PortalListContent(innerPadding, "Free Online Tests", "सभी विद्यार्थियों के लिए", freeTests(), { goBack() })
-            PAGE_HOME_SCIENCE_TESTS -> PortalListContent(innerPadding, "Home Science Daily Tests", "Topic Wise Test Series", homeScienceTests(), { goBack() })
+            PAGE_FREE_TESTS -> PortalListContent(
+                innerPadding = innerPadding,
+                headerBadge = "सभी विद्यार्थियों के लिए",
+                title = "Free Online Tests",
+                subtitle = "निशुल्क ऑनलाइन मॉक टेस्ट सीरीज",
+                entries = if (freeTestsList.isNotEmpty()) freeTestsList else defaultFreeTests(),
+                onBack = { goBack() },
+                onItemClick = onUniversalTestClick
+            )
+            PAGE_HOME_SCIENCE_TESTS -> PortalListContent(
+                innerPadding = innerPadding,
+                headerBadge = "TGT 2026 गृह विज्ञान बैच",
+                title = "Home Science Daily Tests",
+                subtitle = "Topic Wise Practice Tests",
+                entries = if (homeScienceTestsList.isNotEmpty()) homeScienceTestsList else defaultHomeScienceTest(),
+                onBack = { goBack() },
+                onItemClick = onUniversalTestClick
+            )
             PAGE_GS_SECTIONAL -> GsSectionalContent(
                 innerPadding = innerPadding,
                 onBack = { goBack() },
@@ -209,14 +321,49 @@ fun MedhaviHomeScreen() {
                     openPage(PAGE_SUBJECT_TESTS)
                 }
             )
-            PAGE_SUBJECT_TESTS -> SubjectTestsContent(
+            PAGE_SUBJECT_TESTS -> {
+                val currentSubj = selectedSubject ?: gsSubjects().first()
+                val liveTests = gsTestsMap[currentSubj.firebaseKey] ?: defaultGsSubjectTest(currentSubj)
+                SubjectTestsContent(
+                    innerPadding = innerPadding,
+                    subject = currentSubj,
+                    tests = liveTests,
+                    onBack = { goBack() },
+                    onTestClick = onUniversalTestClick
+                )
+            }
+            PAGE_FULL_TESTS -> PortalListContent(
                 innerPadding = innerPadding,
-                subject = selectedSubject ?: gsSubjects().first(),
+                headerBadge = "TGT 2026 Full Mock Tests",
+                title = "Full Mock Tests (125 Q)",
+                subtitle = "Home Science + General Studies",
+                entries = if (fullMockTestsList.isNotEmpty()) fullMockTestsList else defaultFullMockTest(),
+                onBack = { goBack() },
+                onItemClick = onUniversalTestClick
+            )
+            PAGE_VIDEO_CLASSES -> PortalListContent(
+                innerPadding = innerPadding,
+                headerBadge = "Video Classes",
+                title = "Video Classes",
+                subtitle = "Batch के वीडियो लेक्चर",
+                entries = videoClasses(),
                 onBack = { goBack() }
             )
-            PAGE_FULL_TESTS -> PortalListContent(innerPadding, "Full Mock Tests", "Home Science + General Studies", fullTests(), { goBack() })
-            PAGE_VIDEO_CLASSES -> PortalListContent(innerPadding, "Video Classes", "Batch के वीडियो लेक्चर", videoClasses(), { goBack() })
-            PAGE_PDF_NOTES -> PortalListContent(innerPadding, "PDF Notes", "डाउनलोड करने योग्य अध्ययन सामग्री", pdfNotes(), { goBack() })
+            PAGE_PDF_NOTES -> PortalListContent(
+                innerPadding = innerPadding,
+                headerBadge = "Study Material",
+                title = "PDF Notes",
+                subtitle = "डाउनलोड करने योग्य अध्ययन सामग्री",
+                entries = pdfNotes(),
+                onBack = { goBack() }
+            )
+            PAGE_HTML_TEST -> NativeQuizScreen(
+                innerPadding = innerPadding,
+                testId = if (currentTestUrl.isNotBlank()) currentTestUrl else "test41",
+                testTitle = currentTestTitle,
+                studentName = "Ajit",
+                onBack = { goBack() }
+            )
             else -> when (selectedTab) {
                 0 -> HomeContent(innerPadding) { openPage(it) }
                 1 -> CoursesContent(innerPadding) { openPage(it) }
@@ -243,31 +390,7 @@ private fun TestsContent(
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = RoyalBlue,
-                shape = RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 30.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "🎯 TEST PORTAL",
-                        color = Golden,
-                        fontSize = 27.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Free और Batch Tests एक ही स्थान पर",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+            HomeBrandHeader(badgeText = "Online Mock Test Series")
         }
 
         item {
@@ -415,6 +538,11 @@ private fun CoursesContent(
     innerPadding: PaddingValues,
     onOpenPage: (Int) -> Unit
 ) {
+    val courses = listOf(
+        HomeService("🎯", "TGT 2026 Batch", "Home Science + GS", true, PAGE_COMPLETE_BATCH),
+        HomeService("🎯", "TGT 2026 GS Batch", "Complete General Studies", true, PAGE_GS_BATCH)
+    )
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(PageBackground).padding(innerPadding),
         contentPadding = PaddingValues(20.dp)
@@ -426,34 +554,10 @@ private fun CoursesContent(
         }
 
         item {
-            InformationCard(
-                title = "TGT 2026 Complete Batch",
-                onClick = { onOpenPage(PAGE_COMPLETE_BATCH) }
-            ) {
-                Text(
-                    "Home Science + General Studies\nVideo Classes • Tests",
-                    color = DarkText,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-                Text("VIEW COURSE  →", color = RoyalBlue, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        item {
-            InformationCard(
-                title = "TGT 2026 Only GS Batch",
-                onClick = { onOpenPage(PAGE_GS_BATCH) }
-            ) {
-                Text(
-                    "Complete General Studies\nSectional Tests • Full Tests • Video Classes",
-                    color = DarkText,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-                Text("VIEW COURSE  →", color = RoyalBlue, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
+            ServiceGrid(
+                services = courses,
+                onServiceClick = { service -> onOpenPage(service.page) }
+            )
         }
     }
 }
@@ -524,10 +628,7 @@ private fun HomeContent(
 private fun completeBatchCards() = listOf(
     PortalCardData("📚", "Home Science", "वीडियो क्लासेस एवं टेस्ट", PAGE_VIDEO_CLASSES),
     PortalCardData("📝", "20 Full Mock Tests", "ऑनलाइन टेस्ट सीरीज", PAGE_FULL_TESTS),
-
-    // IMPORTANT: यह अलग GS portal नहीं, वही GS content खोलता है
     PortalCardData("📖", "GS (सामान्य अध्ययन)", "विषयवार टेस्ट एवं तैयारी", PAGE_GS_BATCH),
-
     PortalCardData("📋", "Home Science Daily Test", "Topic Wise", PAGE_HOME_SCIENCE_TESTS)
 )
 
@@ -540,54 +641,14 @@ private fun gsBatchCards() = listOf(
 /* -------------------- GS SUBJECT GRID -------------------- */
 
 private fun gsSubjects() = listOf(
-    GsSubject(
-        "📰",
-        "समसामयिकी (Current Affairs)",
-        "राष्ट्रीय/राज्य घटनाएँ, चर्चित व्यक्ति व खेल",
-        1
-    ),
-    GsSubject(
-        "📜",
-        "भारतीय इतिहास व स्वतंत्रता आंदोलन",
-        "प्राचीन, मध्यकालीन व आधुनिक इतिहास",
-        2
-    ),
-    GsSubject(
-        "🏛️",
-        "संविधान एवं राज्यव्यवस्था",
-        "भारतीय संविधान, धाराएँ व संवैधानिक व्यवस्था",
-        2
-    ),
-    GsSubject(
-        "📈",
-        "भारतीय अर्थव्यवस्था",
-        "आर्थिक व्यवस्था, बजट व योजनाएँ",
-        2
-    ),
-    GsSubject(
-        "🌍",
-        "भारत का भूगोल एवं जनसंख्या",
-        "भौगोलिक स्थिति, नदियाँ व जनगणना",
-        2
-    ),
-    GsSubject(
-        "🔬",
-        "सामान्य विज्ञान व पर्यावरण",
-        "दैनिक विज्ञान, तकनीक एवं पर्यावरण",
-        3
-    ),
-    GsSubject(
-        "🩺",
-        "मानव स्वास्थ्य, पोषण एवं रोग",
-        "विटामिन, खनिज, रोग, हार्मोन व एंजाइम",
-        3
-    ),
-    GsSubject(
-        "💻",
-        "कंप्यूटर, ICT एवं शैक्षिक प्रौद्योगिकी",
-        "कंप्यूटर अवधारणा, ICT प्रयोग व डिजिटल शिक्षा",
-        3
-    )
+    GsSubject("📰", "समसामयिकी (Current Affairs)", "राष्ट्रीय/राज्य घटनाएँ, चर्चित व्यक्ति व खेल", 1, "current_affairs"),
+    GsSubject("📜", "भारतीय इतिहास व स्वतंत्रता आंदोलन", "प्राचीन, मध्यकालीन व आधुनिक इतिहास", 2, "history"),
+    GsSubject("🏛️", "संविधान एवं राज्यव्यवस्था", "भारतीय संविधान, धाराएँ व संवैधानिक व्यवस्था", 2, "polity"),
+    GsSubject("📈", "भारतीय अर्थव्यवस्था", "आर्थिक व्यवस्था, बजट व योजनाएँ", 2, "economy"),
+    GsSubject("🌍", "भारत का भूगोल एवं जनसंख्या", "भौगोलिक स्थिति, नदियाँ व जनगणना", 2, "geography"),
+    GsSubject("🔬", "सामान्य विज्ञान व पर्यावरण", "दैनिक विज्ञान, तकनीक एवं पर्यावरण", 3, "science_env"),
+    GsSubject("🩺", "मानव स्वास्थ्य, पोषण एवं रोग", "विटामिन, खनिज, रोग, हार्मोन व एंजाइम", 3, "health_nutrition"),
+    GsSubject("💻", "कंप्यूटर, ICT एवं शैक्षिक प्रौद्योगिकी", "कंप्यूटर अवधारणा, ICT प्रयोग व डिजिटल शिक्षा", 3, "computer_ict")
 )
 
 @Composable
@@ -603,10 +664,7 @@ private fun GsSectionalContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            PortalHeader(
-                title = "📖 सामान्य ज्ञान (TGT / PGT)",
-                subtitle = "उत्तर प्रदेश शिक्षा सेवा चयन आयोग पाठ्यक्रम"
-            )
+            HomeBrandHeader(badgeText = "सामान्य ज्ञान (TGT / PGT 2026)")
         }
 
         item {
@@ -765,23 +823,21 @@ private fun SubjectCard(
 private fun SubjectTestsContent(
     innerPadding: PaddingValues,
     subject: GsSubject,
-    onBack: () -> Unit
+    tests: List<PortalListItem>,
+    onBack: () -> Unit,
+    onTestClick: (PortalListItem) -> Unit = {}
 ) {
-    val tests = subjectTests(subject)
-
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(PageBackground).padding(innerPadding),
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(
-                badgeText = subject.title
-            )
+            HomeBrandHeader(badgeText = subject.title)
         }
 
         item {
             Text(
-                text = "📝 ऑनलाइन मॉक टेस्ट (20 Tests)",
+                text = "📝 ऑनलाइन मॉक टेस्ट (${tests.size} Tests)",
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                 color = DarkText,
                 fontSize = 21.sp,
@@ -796,110 +852,149 @@ private fun SubjectTestsContent(
         }
 
         items(tests) { test ->
-            AttractiveTestRow(test)
+            AttractiveTestRow(
+                item = test,
+                onClick = { onTestClick(test) }
+            )
         }
         item { BottomBackButton(onBack) }
     }
 }
 
-private fun subjectTests(subject: GsSubject): List<PortalListItem> {
-    val specialTitles = when (subject.title) {
-        "संविधान एवं राज्यव्यवस्था" -> listOf(
-            "भारतीय संविधान का ऐतिहासिक विकास",
-            "संविधान सभा एवं संविधान का निर्माण",
-            "संविधान की विशेषताएँ, स्रोत एवं प्रस्तावना",
-            "संघ एवं उसका राज्य-क्षेत्र और नागरिकता",
-            "मौलिक अधिकार—समानता एवं स्वतंत्रता का अधिकार",
-            "मौलिक अधिकार—शोषण, धर्म, संस्कृति व शिक्षा",
-            "राज्य के नीति-निर्देशक तत्व एवं मौलिक कर्तव्य",
-            "संविधान संशोधन, मूल संरचना सिद्धांत एवं अनुसूचियाँ"
-        )
-        else -> emptyList()
-    }
-
-    return (1..20).map { number ->
-        val title = specialTitles.getOrNull(number - 1)
-            ?: "टेस्ट-$number: ${subject.title}"
-        PortalListItem(
-            title = title,
-            subtitle = "विषयवार अभ्यास टेस्ट",
-            status = if (number <= 3) "LIVE" else "SOON"
-        )
-    }
-}
-
 @Composable
-private fun AttractiveTestRow(item: PortalListItem) {
-    val statusInfo = when (item.status) {
-        "LIVE" -> Triple("🟢 Live Now", Color(0xFFE1F5EA), Color(0xFF277A4C))
-        "SOON" -> Triple("⌛ Coming Soon", LightGold, Color(0xFF956E1C))
-        "START" -> Triple("▶ Start Test", Color(0xFFE8F0FF), RoyalBlue)
-        "WATCH" -> Triple("▶ Watch Now", Color(0xFFE8F0FF), RoyalBlue)
-        "OPEN" -> Triple("↗ Open", Color(0xFFF0F2F6), DarkText)
-        else -> Triple(item.status, Color(0xFFF0F2F6), DarkText)
+private fun AttractiveTestRow(
+    item: PortalListItem,
+    onClick: () -> Unit = {}
+) {
+    val cleanStatus = item.status.trim().uppercase()
+    val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START") && item.testUrl.isNotBlank()
+    val isOver = cleanStatus == "TEST OVER" || cleanStatus == "OVER"
+
+    // 1. Live Now = Green, 2. Coming Soon = Original Yellow, 3. Test Over = Red
+    val (badgeText, badgeBg, badgeBorder, badgeTextColor, showDot) = when {
+        isLive -> StatusBadgeStyle(
+            text = "Live Now",
+            bg = Color(0xFFDCFCE7),
+            border = Color(0xFF86EFAC),
+            textColor = Color(0xFF15803D),
+            dot = true
+        )
+        isOver -> StatusBadgeStyle(
+            text = "Test Over",
+            bg = Color(0xFFFEE2E2),
+            border = Color(0xFFFCA5A5),
+            textColor = Color(0xFFB91C1C),
+            dot = true
+        )
+        cleanStatus == "WATCH" -> StatusBadgeStyle(
+            text = "▶ Watch",
+            bg = Color(0xFFE8F5E9),
+            border = Color(0xFFA5D6A7),
+            textColor = Color(0xFF2E7D32),
+            dot = false
+        )
+        cleanStatus == "OPEN" -> StatusBadgeStyle(
+            text = "🔓 Open",
+            bg = Color(0xFFF0F2F6),
+            border = Color(0xFFCBD5E1),
+            textColor = DarkText,
+            dot = false
+        )
+        else -> StatusBadgeStyle(
+            text = "⏳ Coming Soon",
+            bg = LightGold,
+            border = Color(0xFFFDE68A),
+            textColor = Color(0xFFB45309),
+            dot = false
+        )
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .clickable(enabled = isLive, onClick = onClick),
         color = Color.White,
         shape = RoundedCornerShape(16.dp),
-        shadowElevation = 2.dp,
-        border = BorderStroke(1.dp, Color(0xFFE0E4EA))
+        shadowElevation = if (isLive) 2.dp else 0.dp,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 17.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = "📝", fontSize = 22.sp)
-            Spacer(modifier = Modifier.size(10.dp))
+            Spacer(modifier = Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.title, color = DarkText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                if (item.subtitle.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(item.subtitle, color = GreyText, fontSize = 12.sp)
-                }
-            }
-            Spacer(modifier = Modifier.size(10.dp))
-            Surface(
-                color = statusInfo.second,
-                shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(1.dp, statusInfo.third.copy(alpha = 0.25f))
-            ) {
                 Text(
-                    text = statusInfo.first,
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
-                    color = statusInfo.third,
-                    fontSize = 12.sp,
+                    text = item.title,
+                    color = if (isLive) DarkText else Color(0xFF64748B),
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
+                if (item.subtitle.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = item.subtitle,
+                        color = GreyText,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.size(8.dp))
+            Surface(
+                color = badgeBg,
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, badgeBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (showDot) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(badgeTextColor, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    }
+                    Text(
+                        text = badgeText,
+                        color = badgeTextColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
 }
 
-/* -------------------- LIST DATA -------------------- */
-
-private fun freeTests() = listOf(
-    PortalListItem("Free Mock Test - 1", "40 प्रश्न • 30 मिनट", "START"),
-    PortalListItem("Free Mock Test - 2", "40 प्रश्न • 30 मिनट", "START"),
-    PortalListItem("TGT Practice Test", "Home Science + GS", "START")
+private data class StatusBadgeStyle(
+    val text: String,
+    val bg: Color,
+    val border: Color,
+    val textColor: Color,
+    val dot: Boolean
 )
 
-private fun homeScienceTests() = listOf(
-    PortalListItem("Daily Mock Test - 1", "भोजन एवं पोषण", "START"),
-    PortalListItem("Daily Mock Test - 2", "मानव विकास", "START"),
-    PortalListItem("Daily Mock Test - 3", "वस्त्र एवं परिधान", "START"),
-    PortalListItem("Daily Mock Test - 4", "गृह प्रबंधन", "START"),
-    PortalListItem("Daily Mock Test - 5", "प्रसार शिक्षा", "START")
+/* -------------------- 1-1 DEFAULT TEST (जब तक Firebase लोड न हो) -------------------- */
+
+private fun defaultFreeTests() = listOf(
+    PortalListItem("Test - 1 : Free Mock Test", "50 प्रश्न • 40 मिनट", "LIVE", "test41")
 )
 
-private fun fullTests() = listOf(
-    PortalListItem("Full Mock Test - 1", "90 Home Science + 30 GS", "START"),
-    PortalListItem("Full Mock Test - 2", "90 Home Science + 30 GS", "START"),
-    PortalListItem("Full Mock Test - 3", "90 Home Science + 30 GS", "START"),
-    PortalListItem("Full Mock Test - 4", "90 Home Science + 30 GS", "START")
+private fun defaultHomeScienceTest() = listOf(
+    PortalListItem("Test - 1 : गृह विज्ञान का परिचय एवं क्षेत्र", "गृह विज्ञान की अवधारणा एवं शाखाएँ", "TEST OVER", "test01")
+)
+
+private fun defaultFullMockTest() = listOf(
+    PortalListItem("Full Mock Test - 01", "125 प्रश्न • 120 मिनट (TGT Pattern)", "TEST OVER", "test41")
+)
+
+private fun defaultGsSubjectTest(subject: GsSubject) = listOf(
+    PortalListItem("टेस्ट-1 : ${subject.title}", "विषयवार अभ्यास टेस्ट", "COMING SOON", "")
 )
 
 private fun videoClasses() = listOf(
@@ -930,7 +1025,7 @@ private fun BatchPortalContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            PortalHeader(title, subtitle)
+            HomeBrandHeader(badgeText = title)
         }
 
         cards.chunked(2).forEach { rowCards ->
@@ -958,42 +1053,13 @@ private fun BatchPortalContent(
 }
 
 @Composable
-private fun PortalHeader(title: String, subtitle: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = RoyalBlue,
-        shape = RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 30.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = title,
-                color = Golden,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = subtitle,
-                color = Color.White,
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-@Composable
 private fun BottomBackButton(onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 24.dp)
+            .padding(horizontal = 20.dp, vertical = 20.dp)
             .clickable(onClick = onClick),
-        color = RoyalBlue,
+        color = NavyBlue,
         shape = RoundedCornerShape(14.dp),
         shadowElevation = 2.dp
     ) {
@@ -1051,43 +1117,39 @@ private fun BatchPortalCard(
 @Composable
 private fun PortalListContent(
     innerPadding: PaddingValues,
+    headerBadge: String,
     title: String,
     subtitle: String,
     entries: List<PortalListItem>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onItemClick: (PortalListItem) -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(PageBackground).padding(innerPadding),
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = NavyBlue
-            ) {
-                Text(
-                    text = "MEDHAVI STUDY POINT",
-                    modifier = Modifier.padding(20.dp),
-                    color = Golden,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-            }
+            HomeBrandHeader(badgeText = headerBadge)
         }
 
         item {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Text(title, color = NavyBlue, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-                Text(subtitle, color = GreyText, fontSize = 15.sp)
-                Spacer(modifier = Modifier.height(18.dp))
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(text = "📝 $title", color = NavyBlue, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = subtitle, color = GreyText, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(thickness = 2.dp, color = NavyBlue)
             }
         }
 
         items(entries) { listItem ->
-            AttractiveTestRow(listItem)
+            AttractiveTestRow(
+                item = listItem,
+                onClick = { onItemClick(listItem) }
+            )
         }
-        item { BottomBackButton(onBack) }
+
+        item { BottomBackButton(onClick = onBack) }
     }
 }
 
@@ -1187,39 +1249,42 @@ private fun HomeBrandHeader(badgeText: String) {
             .fillMaxWidth()
             .background(
                 color = NavyBlue,
-                shape = RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp)
+                shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
             )
-            .padding(horizontal = 20.dp, vertical = 30.dp),
+            .padding(horizontal = 20.dp, vertical = 26.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 "MEDHAVI STUDY POINT",
                 color = Golden,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 "ज्ञान, अनुशासन और सफलता का डिजिटल सारथी",
-                color = Color.White,
-                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 13.sp,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            Surface(
-                color = Color.White.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(1.dp, Golden.copy(alpha = 0.5f))
-            ) {
-                Text(
-                    text = badgeText,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+            if (badgeText.isNotBlank()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Surface(
+                    color = Color.White.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, Golden.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        text = badgeText,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
     }
