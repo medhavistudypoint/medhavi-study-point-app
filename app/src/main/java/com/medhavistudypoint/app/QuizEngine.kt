@@ -1,5 +1,7 @@
 package com.medhavistudypoint.app
 
+import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,10 +18,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
 data class QuestionItem(
@@ -30,20 +35,134 @@ data class QuestionItem(
     val explanation: String = ""
 )
 
-// हर टेस्ट का अलग सेशन रिकॉर्ड रखने के लिए डेटा क्लास
-data class TestStateRecord(
-    var hasCompleted: Boolean = false,
-    var savedUserAnswers: MutableMap<Int, Int> = mutableMapOf(),
-    var savedDurationTaken: Int = 0,
-    var attemptCount: Int = 1
-)
+// स्थायी स्टोरेज (SharedPreferences) मैनेजर — स्विच ऑफ होने पर भी डेटा सुरक्षित रखता है
+object QuizPersistentManager {
+    private const val PREF_NAME = "medhavi_quiz_prefs"
+    private var prefs: SharedPreferences? = null
 
-object QuizSessionManager {
-    // टेस्ट ID के अनुसार अलग-अलग रिज़ल्ट स्टोर करेगा (ताकि एक टेस्ट दूसरे से न टकराए)
-    val testRecords = mutableMapOf<String, TestStateRecord>()
+    fun init(context: Context) {
+        if (prefs == null) {
+            prefs = context.applicationContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        }
+    }
 
-    fun getRecord(testId: String): TestStateRecord {
-        return testRecords.getOrPut(testId) { TestStateRecord() }
+    fun isSubmitted(testId: String): Boolean {
+        return prefs?.getBoolean("${testId}_submitted", false) ?: false
+    }
+
+    fun hasUnfinishedProgress(testId: String): Boolean {
+        val submitted = isSubmitted(testId)
+        val hasAnswers = prefs?.contains("${testId}_live_answers") ?: false
+        return !submitted && hasAnswers
+    }
+
+    fun saveLiveProgress(
+        testId: String,
+        answers: Map<Int, Int>,
+        visited: Set<Int>,
+        marked: Set<Int>,
+        currentIndex: Int,
+        remainingSeconds: Int
+    ) {
+        prefs?.edit()?.apply {
+            val ansJson = JSONObject()
+            answers.forEach { (k, v) -> ansJson.put(k.toString(), v) }
+            putString("${testId}_live_answers", ansJson.toString())
+
+            val visitedArr = JSONArray()
+            visited.forEach { visitedArr.put(it) }
+            putString("${testId}_live_visited", visitedArr.toString())
+
+            val markedArr = JSONArray()
+            marked.forEach { markedArr.put(it) }
+            putString("${testId}_live_marked", markedArr.toString())
+
+            putInt("${testId}_live_index", currentIndex)
+            putInt("${testId}_live_time", remainingSeconds)
+            putBoolean("${testId}_submitted", false)
+            apply()
+        }
+    }
+
+    fun loadLiveAnswers(testId: String): MutableMap<Int, Int> {
+        val map = mutableMapOf<Int, Int>()
+        val str = prefs?.getString("${testId}_live_answers", null) ?: return map
+        val json = JSONObject(str)
+        json.keys().forEach { k -> map[k.toInt()] = json.getInt(k) }
+        return map
+    }
+
+    fun loadLiveVisited(testId: String): MutableSet<Int> {
+        val set = mutableSetOf<Int>()
+        val str = prefs?.getString("${testId}_live_visited", null) ?: return set
+        val arr = JSONArray(str)
+        for (i in 0 until arr.length()) set.add(arr.getInt(i))
+        return set
+    }
+
+    fun loadLiveMarked(testId: String): MutableSet<Int> {
+        val set = mutableSetOf<Int>()
+        val str = prefs?.getString("${testId}_live_marked", null) ?: return set
+        val arr = JSONArray(str)
+        for (i in 0 until arr.length()) set.add(arr.getInt(i))
+        return set
+    }
+
+    fun loadLiveIndex(testId: String): Int = prefs?.getInt("${testId}_live_index", 0) ?: 0
+    fun loadLiveTime(testId: String, defaultTime: Int): Int = prefs?.getInt("${testId}_live_time", defaultTime) ?: defaultTime
+
+    fun markSubmitted(
+        testId: String,
+        answers: Map<Int, Int>,
+        durationTaken: Int
+    ) {
+        prefs?.edit()?.apply {
+            putBoolean("${testId}_submitted", true)
+            putInt("${testId}_duration_taken", durationTaken)
+
+            val ansJson = JSONObject()
+            answers.forEach { (k, v) -> ansJson.put(k.toString(), v) }
+            putString("${testId}_submitted_answers", ansJson.toString())
+
+            // अधूरा सत्र साफ़ करें
+            remove("${testId}_live_answers")
+            remove("${testId}_live_visited")
+            remove("${testId}_live_marked")
+            remove("${testId}_live_index")
+            remove("${testId}_live_time")
+            apply()
+        }
+    }
+
+    fun loadSubmittedAnswers(testId: String): MutableMap<Int, Int> {
+        val map = mutableMapOf<Int, Int>()
+        val str = prefs?.getString("${testId}_submitted_answers", null) ?: return map
+        val json = JSONObject(str)
+        json.keys().forEach { k -> map[k.toInt()] = json.getInt(k) }
+        return map
+    }
+
+    fun loadSubmittedDuration(testId: String): Int = prefs?.getInt("${testId}_duration_taken", 0) ?: 0
+
+    fun getAttemptCount(testId: String): Int = prefs?.getInt("${testId}_attempt_count", 1) ?: 1
+
+    fun incrementAttemptCount(testId: String) {
+        val count = getAttemptCount(testId)
+        prefs?.edit()?.putInt("${testId}_attempt_count", count + 1)?.apply()
+    }
+
+    fun resetSessionForReattempt(testId: String) {
+        prefs?.edit()?.apply {
+            remove("${testId}_submitted")
+            remove("${testId}_submitted_answers")
+            remove("${testId}_duration_taken")
+            remove("${testId}_live_answers")
+            remove("${testId}_live_visited")
+            remove("${testId}_live_marked")
+            remove("${testId}_live_index")
+            remove("${testId}_live_time")
+            apply()
+        }
     }
 }
 
@@ -56,18 +175,23 @@ fun NativeQuizScreen(
     negativeMarkingPerWrong: Double = 0.33,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        QuizPersistentManager.init(context)
+    }
+
     val navyBlue = Color(0xFF0F1E4A)
     val goldYellow = Color(0xFFFACC15)
-
-    // हर टेस्ट का अपना अलग रिकॉर्ड
-    val currentRecord = remember(testId) { QuizSessionManager.getRecord(testId) }
 
     var dataset by remember(testId) { mutableStateOf<List<QuestionItem>>(emptyList()) }
     var isLoading by remember(testId) { mutableStateOf(true) }
     var loadFailed by remember(testId) { mutableStateOf(false) }
 
-    // Firebase से सवाल लोड करना - हर testId के लिए फ्रेश लोड
+    val totalDurationSeconds = remember(testId) { 50 * 60 }
+
+    // Firebase से सवाल लोड करना
     LaunchedEffect(testId) {
+        QuizPersistentManager.init(context)
         isLoading = true
         loadFailed = false
         val dbRef = com.google.firebase.database.FirebaseDatabase.getInstance()
@@ -144,40 +268,106 @@ fun NativeQuizScreen(
         return
     }
 
-    var showCompletedGate by remember(testId) { mutableStateOf(currentRecord.hasCompleted) }
+    // टेस्ट की स्थिति लोड करना
+    val isAlreadySubmitted = remember(testId) { QuizPersistentManager.isSubmitted(testId) }
+    val hasUnfinished = remember(testId) { QuizPersistentManager.hasUnfinishedProgress(testId) }
+
+    var showResumeRestartDialog by remember(testId) { mutableStateOf(hasUnfinished && !isAlreadySubmitted) }
+    var showCompletedGate by remember(testId) { mutableStateOf(isAlreadySubmitted) }
+    var isSubmitted by remember(testId) { mutableStateOf(isAlreadySubmitted) }
+
     var currentIndex by remember(testId) { mutableIntStateOf(0) }
-    val userAnswers = remember(testId) { mutableStateMapOf<Int, Int>().apply { putAll(currentRecord.savedUserAnswers) } }
+    val userAnswers = remember(testId) { mutableStateMapOf<Int, Int>() }
     val visitedQuestions = remember(testId) { mutableStateSetOf<Int>() }
     val markedQuestions = remember(testId) { mutableStateSetOf<Int>() }
-    var isSubmitted by remember(testId) { mutableStateOf(currentRecord.hasCompleted) }
+    var remainingSeconds by remember(testId) { mutableIntStateOf(totalDurationSeconds) }
+    var attemptCount by remember(testId) { mutableIntStateOf(QuizPersistentManager.getAttemptCount(testId)) }
+
     var showConfirmDialog by remember(testId) { mutableStateOf(false) }
 
-    val totalDurationSeconds = remember(testId) { 50 * 60 }
-    var remainingSeconds by remember(testId) { mutableIntStateOf(totalDurationSeconds) }
+    // अधूरा टेस्ट होने पर पूछने वाला डायलॉग (Resume vs Restart)
+    if (showResumeRestartDialog) {
+        AlertDialog(
+            onDismissRequest = { /* डिसमिस बंद */ },
+            title = { Text("अधूरा टेस्ट उपलब्ध है", fontWeight = FontWeight.Bold, color = navyBlue) },
+            text = { Text("आपने यह टेस्ट पहले बीच में छोड़ दिया था। क्या आप वहीं से शुरू करना चाहते हैं या नए सिरे से?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        userAnswers.clear()
+                        userAnswers.putAll(QuizPersistentManager.loadLiveAnswers(testId))
+                        visitedQuestions.clear()
+                        visitedQuestions.addAll(QuizPersistentManager.loadLiveVisited(testId))
+                        markedQuestions.clear()
+                        markedQuestions.addAll(QuizPersistentManager.loadLiveMarked(testId))
+                        currentIndex = QuizPersistentManager.loadLiveIndex(testId)
+                        remainingSeconds = QuizPersistentManager.loadLiveTime(testId, totalDurationSeconds)
+                        showResumeRestartDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
+                ) {
+                    Text("Resume (वहीं से शुरू करें)")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        QuizPersistentManager.resetSessionForReattempt(testId)
+                        userAnswers.clear()
+                        visitedQuestions.clear()
+                        markedQuestions.clear()
+                        currentIndex = 0
+                        remainingSeconds = totalDurationSeconds
+                        showResumeRestartDialog = false
+                    }
+                ) {
+                    Text("Restart (नए सिरे से)")
+                }
+            }
+        )
+    }
 
     // पहला सवाल विजिट मार्क करें
-    LaunchedEffect(currentIndex, isSubmitted, showCompletedGate) {
-        if (!isSubmitted && !showCompletedGate && dataset.isNotEmpty()) {
+    LaunchedEffect(currentIndex, isSubmitted, showCompletedGate, showResumeRestartDialog) {
+        if (!isSubmitted && !showCompletedGate && !showResumeRestartDialog && dataset.isNotEmpty()) {
             visitedQuestions.add(dataset[currentIndex].id)
+            QuizPersistentManager.saveLiveProgress(
+                testId = testId,
+                answers = userAnswers,
+                visited = visitedQuestions,
+                marked = markedQuestions,
+                currentIndex = currentIndex,
+                remainingSeconds = remainingSeconds
+            )
         }
     }
 
     // टाइमर
-    LaunchedEffect(isSubmitted, showCompletedGate, testId) {
-        while (!isSubmitted && !showCompletedGate && remainingSeconds > 0) {
+    LaunchedEffect(isSubmitted, showCompletedGate, showResumeRestartDialog, testId) {
+        while (!isSubmitted && !showCompletedGate && !showResumeRestartDialog && remainingSeconds > 0) {
             delay(1000L)
             remainingSeconds--
+            // हर 5 सेकंड में या सवाल बदलने पर टाइमर सुरक्षित करें
+            if (remainingSeconds % 5 == 0) {
+                QuizPersistentManager.saveLiveProgress(
+                    testId = testId,
+                    answers = userAnswers,
+                    visited = visitedQuestions,
+                    marked = markedQuestions,
+                    currentIndex = currentIndex,
+                    remainingSeconds = remainingSeconds
+                )
+            }
         }
-        if (remainingSeconds == 0 && !isSubmitted && !showCompletedGate) {
+        if (remainingSeconds == 0 && !isSubmitted && !showCompletedGate && !showResumeRestartDialog) {
             isSubmitted = true
-            currentRecord.hasCompleted = true
-            currentRecord.savedUserAnswers.clear()
-            currentRecord.savedUserAnswers.putAll(userAnswers)
-            currentRecord.savedDurationTaken = totalDurationSeconds - remainingSeconds
+            showCompletedGate = false
+            val durationTaken = totalDurationSeconds - remainingSeconds
+            QuizPersistentManager.markSubmitted(testId, userAnswers, durationTaken)
         }
     }
 
-    val currentQ = dataset[currentIndex]
+    val currentQ = dataset.getOrElse(currentIndex) { dataset[0] }
 
     // सबमिट कन्फर्मेशन डायलॉग
     if (showConfirmDialog) {
@@ -198,10 +388,9 @@ fun NativeQuizScreen(
                     onClick = {
                         showConfirmDialog = false
                         isSubmitted = true
-                        currentRecord.hasCompleted = true
-                        currentRecord.savedUserAnswers.clear()
-                        currentRecord.savedUserAnswers.putAll(userAnswers)
-                        currentRecord.savedDurationTaken = totalDurationSeconds - remainingSeconds
+                        showCompletedGate = false
+                        val durationTaken = totalDurationSeconds - remainingSeconds
+                        QuizPersistentManager.markSubmitted(testId, userAnswers, durationTaken)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
                 ) {
@@ -239,10 +428,10 @@ fun NativeQuizScreen(
                     Text("MEDHAVI STUDY POINT", color = goldYellow, fontSize = 18.sp, fontWeight = FontWeight.Black)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(testTitle, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
-                        if (currentRecord.attemptCount > 1) {
+                        if (attemptCount > 1) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "(Re-attempt #${currentRecord.attemptCount})",
+                                text = "(Re-attempt #$attemptCount)",
                                 color = goldYellow,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -307,7 +496,7 @@ fun NativeQuizScreen(
                         Button(
                             onClick = {
                                 userAnswers.clear()
-                                userAnswers.putAll(currentRecord.savedUserAnswers)
+                                userAnswers.putAll(QuizPersistentManager.loadSubmittedAnswers(testId))
                                 showCompletedGate = false
                                 isSubmitted = true
                             },
@@ -322,16 +511,16 @@ fun NativeQuizScreen(
 
                         Button(
                             onClick = {
-                                showCompletedGate = false
-                                isSubmitted = false
+                                QuizPersistentManager.resetSessionForReattempt(testId)
+                                QuizPersistentManager.incrementAttemptCount(testId)
+                                attemptCount = QuizPersistentManager.getAttemptCount(testId)
                                 userAnswers.clear()
-                                currentRecord.savedUserAnswers.clear()
                                 visitedQuestions.clear()
                                 markedQuestions.clear()
                                 currentIndex = 0
                                 remainingSeconds = totalDurationSeconds
-                                currentRecord.attemptCount++
-                                currentRecord.hasCompleted = false
+                                showCompletedGate = false
+                                isSubmitted = false
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
@@ -357,7 +546,8 @@ fun NativeQuizScreen(
             val correctCount = dataset.count { userAnswers[it.id] == it.correct }
             val incorrectCount = userAnswers.count { (id, ans) -> ans != (dataset.find { it.id == id }?.correct ?: -1) }
             val skippedCount = dataset.size - userAnswers.size
-            val timeTakenSeconds = if (currentRecord.savedDurationTaken > 0) currentRecord.savedDurationTaken else (totalDurationSeconds - remainingSeconds)
+            val savedDuration = QuizPersistentManager.loadSubmittedDuration(testId)
+            val timeTakenSeconds = if (savedDuration > 0) savedDuration else (totalDurationSeconds - remainingSeconds)
             val finalScore = (correctCount * 1.0) - (incorrectCount * negativeMarkingPerWrong)
             val scoreFormatted = String.format(Locale.US, "%.2f", if (finalScore < 0) 0.0 else finalScore)
 
@@ -377,14 +567,14 @@ fun NativeQuizScreen(
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(text = "परीक्षार्थी: $studentName", fontSize = 14.sp, color = Color(0xFF1E293B), fontWeight = FontWeight.Bold)
-                    if (currentRecord.attemptCount > 1) {
+                    if (attemptCount > 1) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .background(Color(0xFFFEF08A), RoundedCornerShape(4.dp))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Text("RE-ATTEMPTED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF854D0E))
+                            Text("RE-ATTEMPTED #$attemptCount", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF854D0E))
                         }
                     }
                 }
@@ -412,15 +602,16 @@ fun NativeQuizScreen(
 
                 Button(
                     onClick = {
+                        QuizPersistentManager.resetSessionForReattempt(testId)
+                        QuizPersistentManager.incrementAttemptCount(testId)
+                        attemptCount = QuizPersistentManager.getAttemptCount(testId)
                         userAnswers.clear()
-                        currentRecord.savedUserAnswers.clear()
                         visitedQuestions.clear()
                         markedQuestions.clear()
                         currentIndex = 0
                         remainingSeconds = totalDurationSeconds
-                        currentRecord.attemptCount++
-                        currentRecord.hasCompleted = false
                         isSubmitted = false
+                        showCompletedGate = false
                     },
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
@@ -535,7 +726,17 @@ fun NativeQuizScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 5.dp)
-                            .clickable { userAnswers[currentQ.id] = optIndex },
+                            .clickable {
+                                userAnswers[currentQ.id] = optIndex
+                                QuizPersistentManager.saveLiveProgress(
+                                    testId = testId,
+                                    answers = userAnswers,
+                                    visited = visitedQuestions,
+                                    marked = markedQuestions,
+                                    currentIndex = currentIndex,
+                                    remainingSeconds = remainingSeconds
+                                )
+                            },
                         colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFFEFF6FF) else Color.White),
                         border = BorderStroke(1.dp, if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1)),
                         shape = RoundedCornerShape(8.dp)
@@ -558,16 +759,54 @@ fun NativeQuizScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { if (currentIndex > 0) currentIndex-- }, modifier = Modifier.weight(1f), enabled = currentIndex > 0) {
+                    OutlinedButton(
+                        onClick = {
+                            if (currentIndex > 0) {
+                                currentIndex--
+                                QuizPersistentManager.saveLiveProgress(
+                                    testId = testId,
+                                    answers = userAnswers,
+                                    visited = visitedQuestions,
+                                    marked = markedQuestions,
+                                    currentIndex = currentIndex,
+                                    remainingSeconds = remainingSeconds
+                                )
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = currentIndex > 0
+                    ) {
                         Text("◀ पिछला")
                     }
-                    OutlinedButton(onClick = { userAnswers.remove(currentQ.id) }, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = {
+                            userAnswers.remove(currentQ.id)
+                            QuizPersistentManager.saveLiveProgress(
+                                testId = testId,
+                                answers = userAnswers,
+                                visited = visitedQuestions,
+                                marked = markedQuestions,
+                                currentIndex = currentIndex,
+                                remainingSeconds = remainingSeconds
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text("Clear")
                     }
                     OutlinedButton(
                         onClick = {
                             if (markedQuestions.contains(currentQ.id)) markedQuestions.remove(currentQ.id)
                             else markedQuestions.add(currentQ.id)
+
+                            QuizPersistentManager.saveLiveProgress(
+                                testId = testId,
+                                answers = userAnswers,
+                                visited = visitedQuestions,
+                                marked = markedQuestions,
+                                currentIndex = currentIndex,
+                                remainingSeconds = remainingSeconds
+                            )
                         },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -578,7 +817,19 @@ fun NativeQuizScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Button(
-                    onClick = { if (currentIndex < dataset.size - 1) currentIndex++ },
+                    onClick = {
+                        if (currentIndex < dataset.size - 1) {
+                            currentIndex++
+                            QuizPersistentManager.saveLiveProgress(
+                                testId = testId,
+                                answers = userAnswers,
+                                visited = visitedQuestions,
+                                marked = markedQuestions,
+                                currentIndex = currentIndex,
+                                remainingSeconds = remainingSeconds
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = navyBlue),
                     shape = RoundedCornerShape(8.dp)
@@ -624,7 +875,17 @@ fun NativeQuizScreen(
                                 .size(40.dp)
                                 .background(bg, RoundedCornerShape(6.dp))
                                 .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(6.dp))
-                                .clickable { currentIndex = idx },
+                                .clickable {
+                                    currentIndex = idx
+                                    QuizPersistentManager.saveLiveProgress(
+                                        testId = testId,
+                                        answers = userAnswers,
+                                        visited = visitedQuestions,
+                                        marked = markedQuestions,
+                                        currentIndex = currentIndex,
+                                        remainingSeconds = remainingSeconds
+                                    )
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(text = "${idx + 1}", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)

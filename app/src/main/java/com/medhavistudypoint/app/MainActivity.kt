@@ -861,17 +861,30 @@ private fun SubjectTestsContent(
     }
 }
 
+
 @Composable
 private fun AttractiveTestRow(
     item: PortalListItem,
     onClick: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isSubmitted = remember(item.testUrl) {
+        QuizPersistentManager.init(context)
+        item.testUrl.isNotBlank() && QuizPersistentManager.isSubmitted(item.testUrl)
+    }
+
     val cleanStatus = item.status.trim().uppercase()
-    val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START") && item.testUrl.isNotBlank()
+    val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START")
     val isOver = cleanStatus == "TEST OVER" || cleanStatus == "OVER"
 
-    // 1. Live Now = Green, 2. Coming Soon = Original Yellow, 3. Test Over = Red
     val (badgeText, badgeBg, badgeBorder, badgeTextColor, showDot) = when {
+        isSubmitted -> StatusBadgeStyle(
+            text = "Completed",
+            bg = Color(0xFFE0E7FF),
+            border = Color(0xFF818CF8),
+            textColor = Color(0xFF4338CA),
+            dot = true
+        )
         isLive -> StatusBadgeStyle(
             text = "Live Now",
             bg = Color(0xFFDCFCE7),
@@ -893,18 +906,11 @@ private fun AttractiveTestRow(
             textColor = Color(0xFF2E7D32),
             dot = false
         )
-        cleanStatus == "OPEN" -> StatusBadgeStyle(
-            text = "🔓 Open",
-            bg = Color(0xFFF0F2F6),
-            border = Color(0xFFCBD5E1),
-            textColor = DarkText,
-            dot = false
-        )
         else -> StatusBadgeStyle(
-            text = "⏳ Coming Soon",
-            bg = LightGold,
-            border = Color(0xFFFDE68A),
-            textColor = Color(0xFFB45309),
+            text = "Coming Soon",
+            bg = Color(0xFFFEF9C3),
+            border = Color(0xFFFDE047),
+            textColor = Color(0xFF854D0E),
             dot = false
         )
     }
@@ -912,50 +918,61 @@ private fun AttractiveTestRow(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
-            .clickable(enabled = isLive, onClick = onClick),
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clickable { onClick() },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
         color = Color.White,
-        shape = RoundedCornerShape(16.dp),
-        shadowElevation = if (isLive) 2.dp else 0.dp,
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+        shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 17.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = "📝", fontSize = 22.sp)
-            Spacer(modifier = Modifier.size(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(
-                    text = item.title,
-                    color = if (isLive) DarkText else Color(0xFF64748B),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "📝",
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(end = 12.dp)
                 )
-                if (item.subtitle.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                Column {
+                    Text(
+                        text = item.title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = item.subtitle,
-                        color = GreyText,
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
                     )
                 }
             }
-            Spacer(modifier = Modifier.size(8.dp))
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                 color = badgeBg,
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(1.dp, badgeBorder)
+                border = androidx.compose.foundation.BorderStroke(1.dp, badgeBorder)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (showDot) {
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
-                                .background(badgeTextColor, CircleShape)
+                                .size(6.dp)
+                                .background(badgeTextColor, androidx.compose.foundation.shape.CircleShape)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                     }
