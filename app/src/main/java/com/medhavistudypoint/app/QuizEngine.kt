@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +36,7 @@ data class QuestionItem(
     val explanation: String = ""
 )
 
-// स्थायी स्टोरेज (SharedPreferences) मैनेजर — स्विच ऑफ होने पर भी डेटा सुरक्षित रखता है
+// स्थायी स्टोरेज (SharedPreferences) मैनेजर
 object QuizPersistentManager {
     private const val PREF_NAME = "medhavi_quiz_prefs"
     private var prefs: SharedPreferences? = null
@@ -171,7 +172,7 @@ fun NativeQuizScreen(
     innerPadding: PaddingValues,
     testId: String = "test41",
     testTitle: String,
-    studentName: String = "Ajit",
+    studentName: String = "student", // 👈 "
     negativeMarkingPerWrong: Double = 0.33,
     onBack: () -> Unit
 ) {
@@ -188,6 +189,12 @@ fun NativeQuizScreen(
     var loadFailed by remember(testId) { mutableStateOf(false) }
 
     val totalDurationSeconds = remember(testId) { 50 * 60 }
+
+    // 🌐 ट्रांसलेशन स्टेट्स
+    var isEnglish by remember { mutableStateOf(false) }
+    var translatedQuestion by remember { mutableStateOf("") }
+    var translatedOptions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isTranslating by remember { mutableStateOf(false) }
 
     // Firebase से सवाल लोड करना
     LaunchedEffect(testId) {
@@ -285,6 +292,23 @@ fun NativeQuizScreen(
 
     var showConfirmDialog by remember(testId) { mutableStateOf(false) }
 
+    // 🔄 प्रश्न बदलने या भाषा बदलने पर ट्रांसलेट करने वाला लॉजिक
+    LaunchedEffect(currentIndex, isEnglish, dataset) {
+        if (isEnglish && dataset.isNotEmpty()) {
+            val q = dataset.getOrNull(currentIndex)
+            if (q != null) {
+                isTranslating = true
+                translatedQuestion = QuizTranslatorHelper.translate(q.question)
+                val tempOpts = mutableListOf<String>()
+                for (opt in q.options) {
+                    tempOpts.add(QuizTranslatorHelper.translate(opt))
+                }
+                translatedOptions = tempOpts
+                isTranslating = false
+            }
+        }
+    }
+
     // अधूरा टेस्ट होने पर पूछने वाला डायलॉग (Resume vs Restart)
     if (showResumeRestartDialog) {
         AlertDialog(
@@ -347,7 +371,6 @@ fun NativeQuizScreen(
         while (!isSubmitted && !showCompletedGate && !showResumeRestartDialog && remainingSeconds > 0) {
             delay(1000L)
             remainingSeconds--
-            // हर 5 सेकंड में या सवाल बदलने पर टाइमर सुरक्षित करें
             if (remainingSeconds % 5 == 0) {
                 QuizPersistentManager.saveLiveProgress(
                     testId = testId,
@@ -411,7 +434,7 @@ fun NativeQuizScreen(
             .padding(innerPadding)
             .background(Color(0xFFF1F5F9))
     ) {
-        // हेडर
+        // हेडर (Translate Toggle Button सहित)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -424,14 +447,14 @@ fun NativeQuizScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text("MEDHAVI STUDY POINT", color = goldYellow, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("MEDHAVI STUDY POINT", color = goldYellow, fontSize = 17.sp, fontWeight = FontWeight.Black)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(testTitle, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
+                        Text(testTitle, color = Color.White.copy(alpha = 0.12f), fontSize = 32.sp)
                         if (attemptCount > 1) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "(Re-attempt #$attemptCount)",
+                                text = "(#$attemptCount)",
                                 color = goldYellow,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -439,11 +462,34 @@ fun NativeQuizScreen(
                         }
                     }
                 }
+
+                // 🌐 Google Translate Toggle Button
+                Surface(
+                    modifier = Modifier
+                        .clickable { isEnglish = !isEnglish },
+                    shape = RoundedCornerShape(20.dp),
+                    color = goldYellow
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isEnglish) "अ हिंदी" else "A English",
+                            color = navyBlue,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Box(
                     modifier = Modifier
                         .background(Color(0xFF1E3A8A), RoundedCornerShape(8.dp))
                         .border(1.dp, Color(0xFF3B82F6), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     val m = remainingSeconds / 60
                     val s = remainingSeconds % 60
@@ -451,7 +497,7 @@ fun NativeQuizScreen(
                         text = String.format(Locale.US, "%02d:%02d", m, s),
                         color = goldYellow,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
                 }
             }
@@ -703,180 +749,57 @@ fun NativeQuizScreen(
                 }
             }
         } else {
-            // 3. लाइव टेस्ट प्रश्न स्क्रीन
-            Column(
+            // 3. लाइव टेस्ट प्रश्न स्क्रीन (वॉटरमार्क कार्ड्स के ऊपर दिखेगा)
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp)
+                    .fillMaxWidth()
             ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("प्रश्न: ${currentIndex + 1} / ${dataset.size}", fontWeight = FontWeight.Bold, color = navyBlue)
-                    Text("ऑनलाइन टेस्ट", color = Color(0xFF0284C7), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(text = currentQ.question, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A), lineHeight = 22.sp)
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                currentQ.options.forEachIndexed { optIndex, optionText ->
-                    val isSelected = userAnswers[currentQ.id] == optIndex
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 5.dp)
-                            .clickable {
-                                userAnswers[currentQ.id] = optIndex
-                                QuizPersistentManager.saveLiveProgress(
-                                    testId = testId,
-                                    answers = userAnswers,
-                                    visited = visitedQuestions,
-                                    marked = markedQuestions,
-                                    currentIndex = currentIndex,
-                                    remainingSeconds = remainingSeconds
-                                )
-                            },
-                        colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFFEFF6FF) else Color.White),
-                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1)),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .background(if (isSelected) Color(0xFF2563EB) else Color(0xFFF1F5F9), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(text = ('A' + optIndex).toString(), color = if (isSelected) Color.White else navyBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(text = optionText, fontSize = 14.sp, color = Color(0xFF1E293B))
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            if (currentIndex > 0) {
-                                currentIndex--
-                                QuizPersistentManager.saveLiveProgress(
-                                    testId = testId,
-                                    answers = userAnswers,
-                                    visited = visitedQuestions,
-                                    marked = markedQuestions,
-                                    currentIndex = currentIndex,
-                                    remainingSeconds = remainingSeconds
-                                )
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = currentIndex > 0
-                    ) {
-                        Text("◀ पिछला")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            userAnswers.remove(currentQ.id)
-                            QuizPersistentManager.saveLiveProgress(
-                                testId = testId,
-                                answers = userAnswers,
-                                visited = visitedQuestions,
-                                marked = markedQuestions,
-                                currentIndex = currentIndex,
-                                remainingSeconds = remainingSeconds
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Clear")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            if (markedQuestions.contains(currentQ.id)) markedQuestions.remove(currentQ.id)
-                            else markedQuestions.add(currentQ.id)
-
-                            QuizPersistentManager.saveLiveProgress(
-                                testId = testId,
-                                answers = userAnswers,
-                                visited = visitedQuestions,
-                                marked = markedQuestions,
-                                currentIndex = currentIndex,
-                                remainingSeconds = remainingSeconds
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (markedQuestions.contains(currentQ.id)) "★ Marked" else "☆ Mark")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Button(
-                    onClick = {
-                        if (currentIndex < dataset.size - 1) {
-                            currentIndex++
-                            QuizPersistentManager.saveLiveProgress(
-                                testId = testId,
-                                answers = userAnswers,
-                                visited = visitedQuestions,
-                                marked = markedQuestions,
-                                currentIndex = currentIndex,
-                                remainingSeconds = remainingSeconds
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = navyBlue),
-                    shape = RoundedCornerShape(8.dp)
+                // 📝 1. नीचे रहेगा मुख्य टेस्ट UI (प्रश्न, विकल्प और बटन)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
                 ) {
-                    Text(if (currentIndex == dataset.size - 1) "अंतिम प्रश्न" else "अगला ▶", fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-                Text("प्रश्न पैलेट ग्रिड", fontWeight = FontWeight.Bold, color = navyBlue)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier.height(250.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(dataset.size) { idx ->
-                        val qId = dataset[idx].id
-                        val isAns = userAnswers.containsKey(qId)
-                        val isMark = markedQuestions.contains(qId)
-                        val isVisited = visitedQuestions.contains(qId)
-                        val isCur = idx == currentIndex
-
-                        val bg = when {
-                            isCur && !isAns && !isMark -> Color.White
-                            isMark -> Color(0xFF8B5CF6)
-                            isAns -> Color(0xFF16A34A)
-                            isVisited -> Color(0xFFDC2626)
-                            else -> Color(0xFFFFFFFF)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("प्रश्न: ${currentIndex + 1} / ${dataset.size}", fontWeight = FontWeight.Bold, color = navyBlue)
+                        if (isTranslating) {
+                            Text("अनुवाद हो रहा है...", color = Color(0xFFEA580C), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("ऑनलाइन टेस्ट", color = Color(0xFF0284C7), fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         }
+                    }
 
-                        val borderColor = if (isCur) Color(0xFFDC2626) else Color(0xFFCBD5E1)
-                        val borderWidth = if (isCur) 2.5.dp else 1.dp
-                        val textColor = when {
-                            isCur && !isAns && !isMark -> Color(0xFFDC2626)
-                            isMark || isAns || isVisited -> Color.White
-                            else -> Color(0xFF1E293B)
-                        }
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                        Box(
+                    // 📝 प्रश्न (हिंदी या इंग्लिश)
+                    val displayQuestion = if (isEnglish && translatedQuestion.isNotBlank()) translatedQuestion else currentQ.question
+                    Text(
+                        text = displayQuestion,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0F172A),
+                        lineHeight = 22.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // 🔘 विकल्प (हिंदी या इंग्लिश)
+                    currentQ.options.forEachIndexed { optIndex, originalOptionText ->
+                        val displayOption = if (isEnglish && translatedOptions.size > optIndex) translatedOptions[optIndex] else originalOptionText
+                        val isSelected = userAnswers[currentQ.id] == optIndex
+
+                        Card(
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(bg, RoundedCornerShape(6.dp))
-                                .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(6.dp))
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp)
                                 .clickable {
-                                    currentIndex = idx
+                                    userAnswers[currentQ.id] = optIndex
                                     QuizPersistentManager.saveLiveProgress(
                                         testId = testId,
                                         answers = userAnswers,
@@ -886,22 +809,175 @@ fun NativeQuizScreen(
                                         remainingSeconds = remainingSeconds
                                     )
                                 },
-                            contentAlignment = Alignment.Center
+                            colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFFEFF6FF) else Color.White),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1)),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(text = "${idx + 1}", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .background(if (isSelected) Color(0xFF2563EB) else Color(0xFFF1F5F9), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(text = ('A' + optIndex).toString(), color = if (isSelected) Color.White else navyBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(text = displayOption, fontSize = 14.sp, color = Color(0xFF1E293B))
+                            }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                if (currentIndex > 0) {
+                                    currentIndex--
+                                    QuizPersistentManager.saveLiveProgress(
+                                        testId = testId,
+                                        answers = userAnswers,
+                                        visited = visitedQuestions,
+                                        marked = markedQuestions,
+                                        currentIndex = currentIndex,
+                                        remainingSeconds = remainingSeconds
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = currentIndex > 0
+                        ) {
+                            Text("◀ पिछला")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                userAnswers.remove(currentQ.id)
+                                QuizPersistentManager.saveLiveProgress(
+                                    testId = testId,
+                                    answers = userAnswers,
+                                    visited = visitedQuestions,
+                                    marked = markedQuestions,
+                                    currentIndex = currentIndex,
+                                    remainingSeconds = remainingSeconds
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Clear")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (markedQuestions.contains(currentQ.id)) markedQuestions.remove(currentQ.id)
+                                else markedQuestions.add(currentQ.id)
+
+                                QuizPersistentManager.saveLiveProgress(
+                                    testId = testId,
+                                    answers = userAnswers,
+                                    visited = visitedQuestions,
+                                    marked = markedQuestions,
+                                    currentIndex = currentIndex,
+                                    remainingSeconds = remainingSeconds
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (markedQuestions.contains(currentQ.id)) "★ Marked" else "☆ Mark")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            if (currentIndex < dataset.size - 1) {
+                                currentIndex++
+                                QuizPersistentManager.saveLiveProgress(
+                                    testId = testId,
+                                    answers = userAnswers,
+                                    visited = visitedQuestions,
+                                    marked = markedQuestions,
+                                    currentIndex = currentIndex,
+                                    remainingSeconds = remainingSeconds
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = navyBlue),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (currentIndex == dataset.size - 1) "अंतिम प्रश्न" else "अगला ▶", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text("प्रश्न पैलेट ग्रिड", fontWeight = FontWeight.Bold, color = navyBlue)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(5),
+                        modifier = Modifier.height(250.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(dataset.size) { idx ->
+                            val qId = dataset[idx].id
+                            val isAns = userAnswers.containsKey(qId)
+                            val isMark = markedQuestions.contains(qId)
+                            val isVisited = visitedQuestions.contains(qId)
+                            val isCur = idx == currentIndex
+
+                            val bg = when {
+                                isCur && !isAns && !isMark -> Color.White
+                                isMark -> Color(0xFF8B5CF6)
+                                isAns -> Color(0xFF16A34A)
+                                isVisited -> Color(0xFFDC2626)
+                                else -> Color(0xFFFFFFFF)
+                            }
+
+                            val borderColor = if (isCur) Color(0xFFDC2626) else Color(0xFFCBD5E1)
+                            val borderWidth = if (isCur) 2.5.dp else 1.dp
+                            val textColor = when {
+                                isCur && !isAns && !isMark -> Color(0xFFDC2626)
+                                isMark || isAns || isVisited -> Color.White
+                                else -> Color(0xFF1E293B)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(bg, RoundedCornerShape(6.dp))
+                                    .border(width = borderWidth, color = borderColor, shape = RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        currentIndex = idx
+                                        QuizPersistentManager.saveLiveProgress(
+                                            testId = testId,
+                                            answers = userAnswers,
+                                            visited = visitedQuestions,
+                                            marked = markedQuestions,
+                                            currentIndex = currentIndex,
+                                            remainingSeconds = remainingSeconds
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = "${idx + 1}", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = { showConfirmDialog = true },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("✔ सबमिट करें (Submit Test)", fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                Button(
-                    onClick = { showConfirmDialog = true },
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("✔ सबमिट करें (Submit Test)", fontWeight = FontWeight.Bold, color = Color.White)
-                }
+                // 🛡️ 2. ऊपर ओवरले वॉटरमार्क (कार्ड्स और ऑप्शन्स के ऊपर दिखेगा और क्लिक को भी नहीं रोकेगा)
+                FullScreenWatermarkPattern(text = "MEDHAVI STUDY POINT")
             }
         }
 
@@ -912,6 +988,33 @@ fun NativeQuizScreen(
             shape = RoundedCornerShape(6.dp)
         ) {
             Text("← Back", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// 🛡️ कार्ड्स के ऊपर दिखने वाला आकर्षक, बड़ा और बोल्ड वॉटरमार्क
+@Composable
+fun FullScreenWatermarkPattern(
+    text: String = "MEDHAVI STUDY POINT"
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 40.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        repeat(5) {
+            Text(
+                text = text,
+                color = Color(0xFF0F1E4A).copy(alpha = 0.08f), // कार्ड्स के ऊपर हल्का और एकदम क्लियर
+                fontSize = 30.sp,                              // बड़ा फॉन्ट
+                fontWeight = FontWeight.Black,                 // एक्स्ट्रा बोल्ड
+                letterSpacing = 2.5.sp,
+                modifier = Modifier.graphicsLayer {
+                    rotationZ = -28f                           // सटीक तिरछा एंगल
+                }
+            )
         }
     }
 }

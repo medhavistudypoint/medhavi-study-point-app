@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.medhavistudypoint.app.ui.theme.MedhaviStudyPointTheme
 
+// 🎨 ऐप के कलर पैलेट (App Color Palette)
 private val NavyBlue = Color(0xFF082A66)
 private val RoyalBlue = Color(0xFF173F8F)
 private val Golden = Color(0xFFFFC400)
@@ -58,6 +59,7 @@ private val LightGreen = Color(0xFFEAF7EF)
 private val GreyBorder = Color(0xFFE0E0E0)
 private val AccentYellow = Color(0xFFE9B200)
 
+// 📄 ऐप के सभी पेजेस के आईडी (Page Navigation Constants)
 private const val PAGE_ROOT = 0
 private const val PAGE_COMPLETE_BATCH = 1
 private const val PAGE_GS_BATCH = 2
@@ -69,8 +71,10 @@ private const val PAGE_VIDEO_CLASSES = 7
 private const val PAGE_PDF_NOTES = 8
 private const val PAGE_SUBJECT_TESTS = 9
 private const val PAGE_HTML_TEST = 10
-private const val PAGE_VIDEO_PLAYER = 11 // वीडियो प्लेयर के लिए नया पेज जोड़ा गया
+private const val PAGE_VIDEO_PLAYER = 11
+private const val PAGE_DYNAMIC_VIDEO_LIST = 12
 
+// 📊 डेटा मॉडल्स (Data Models)
 data class HomeService(
     val icon: String,
     val title: String,
@@ -98,6 +102,14 @@ data class PortalListItem(
     val testUrl: String = ""
 )
 
+data class VideoClassItem(
+    val id: String = "",
+    val title: String = "",
+    val videoUrl: String = "",
+    val status: String = "COMING SOON",
+    val order: Int = 0
+)
+
 data class GsSubject(
     val icon: String,
     val title: String,
@@ -106,6 +118,7 @@ data class GsSubject(
     val firebaseKey: String = "polity"
 )
 
+// 🚀 मुख्य एक्टिविटी (Main Activity)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,12 +127,12 @@ class MainActivity : ComponentActivity() {
             MedhaviStudyPointTheme {
                 val context = androidx.compose.ui.platform.LocalContext.current
 
-                androidx.compose.runtime.LaunchedEffect(Unit) {
+                LaunchedEffect(Unit) {
                     AuthSessionManager.init(context)
                 }
 
-                var isLoggedIn by androidx.compose.runtime.remember {
-                    androidx.compose.runtime.mutableStateOf(AuthSessionManager.isLoggedIn())
+                var isLoggedIn by remember {
+                    mutableStateOf(AuthSessionManager.isLoggedIn())
                 }
 
                 if (!isLoggedIn) {
@@ -136,6 +149,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// 🏠 होम स्क्रीन और नेविगेशन कंट्रोलर
 @Composable
 fun MedhaviHomeScreen() {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -145,9 +159,10 @@ fun MedhaviHomeScreen() {
     var currentTestTitle by remember { mutableStateOf("Online Test") }
     var currentTestUrl by remember { mutableStateOf("") }
 
-    // वीडियो प्लेयर के लिए स्टेट वेरिएबल्स
     var currentVideoTitle by remember { mutableStateOf("TGT Home Science Class") }
     var currentVideoUrl by remember { mutableStateOf("") }
+    var currentVideoDatabasePath by remember { mutableStateOf("batch_video/home_science") }
+    var currentVideoBatchTitle by remember { mutableStateOf("Home Science Classes") }
 
     var hasFullBatchAccess by remember { mutableStateOf(false) }
     var hasGsAccess by remember { mutableStateOf(false) }
@@ -155,6 +170,7 @@ fun MedhaviHomeScreen() {
     var selectedBatchName by remember { mutableStateOf("") }
     var selectedBatchFee by remember { mutableStateOf("") }
 
+    // 🔥 फुल बैच रास्ते का मुख्य फ्लैग
     var isInsideFullBatchFlow by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -258,52 +274,64 @@ fun MedhaviHomeScreen() {
         } else if (activePage != PAGE_ROOT) {
             activePage = PAGE_ROOT
         }
-        if (activePage == PAGE_ROOT && selectedTab == 0) {
+        if (activePage == PAGE_ROOT) {
             selectedSubject = null
-            isInsideFullBatchFlow = false
+            isInsideFullBatchFlow = false // होम स्क्रीन पर आने पर ही रिसेट होगा
         }
     }
 
+    // 🔒 टेस्ट लॉक और पेमेंट सिस्टम (सुधारा हुआ)
     val onUniversalTestClick: (PortalListItem) -> Unit = { item ->
         val cleanStatus = item.status.trim().uppercase()
         val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START")
         if (isLive) {
-            val hsIndex = homeScienceTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
-            val mockIndex = fullMockTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
+            // 🟢 1. फ्री टेस्ट की जांच (यह हमेशा हर किसी के लिए फ्री रहेगा)
+            val isFreeSectionTest = activePage == PAGE_FREE_TESTS ||
+                    freeTestsList.any { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
 
-            val currentGsList = selectedSubject?.let { gsTestsMap[it.title] }
-                ?: gsTestsMap.values.firstOrNull { list -> list.any { it.title == item.title } }
-                ?: emptyList()
-            val gsIndex = currentGsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
-
-            val isFreeDemo = when {
-                mockIndex != -1 -> mockIndex in 0..1
-                hsIndex != -1 -> hsIndex in 0..1
-                gsIndex != -1 -> gsIndex in 0..1
-                else -> false
-            }
-
-            val isFullBatchItem = isInsideFullBatchFlow ||
-                    backStack.contains(PAGE_COMPLETE_BATCH) ||
-                    activePage == PAGE_COMPLETE_BATCH ||
-                    hsIndex != -1 ||
-                    mockIndex != -1
-
-            val isUnlocked = isFreeDemo || hasFullBatchAccess || (!isFullBatchItem && hasGsAccess)
-
-            if (isUnlocked) {
+            if (isFreeSectionTest) {
                 currentTestTitle = item.title
                 currentTestUrl = item.testUrl
                 openPage(PAGE_HTML_TEST)
             } else {
-                if (isFullBatchItem) {
-                    selectedBatchName = "TGT 2026 Full Batch (Home Science + GS)"
-                    selectedBatchFee = "₹299"
-                } else {
-                    selectedBatchName = "TGT 2026 GS Batch"
-                    selectedBatchFee = "₹99"
+                // 🟡 2. पेड बैच टेस्ट्स के इंडेक्स
+                val hsIndex = homeScienceTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
+                val mockIndex = fullMockTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
+
+                val currentGsList = selectedSubject?.let { gsTestsMap[it.title] }
+                    ?: gsTestsMap.values.firstOrNull { list -> list.any { it.title == item.title } }
+                    ?: emptyList()
+                val gsIndex = currentGsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
+
+                val isFreeDemo = when {
+                    mockIndex != -1 -> mockIndex in 0..1
+                    hsIndex != -1 -> hsIndex in 0..1
+                    gsIndex != -1 -> gsIndex in 0..1
+                    else -> false
                 }
-                showPaymentDialog = true
+
+                val isFullBatchItem = isInsideFullBatchFlow ||
+                        backStack.contains(PAGE_COMPLETE_BATCH) ||
+                        activePage == PAGE_COMPLETE_BATCH ||
+                        hsIndex != -1 ||
+                        mockIndex != -1
+
+                val isUnlocked = isFreeDemo || hasFullBatchAccess || (!isFullBatchItem && hasGsAccess)
+
+                if (isUnlocked) {
+                    currentTestTitle = item.title
+                    currentTestUrl = item.testUrl
+                    openPage(PAGE_HTML_TEST)
+                } else {
+                    if (isFullBatchItem) {
+                        selectedBatchName = "TGT 2026 Full Batch (Home Science + GS)"
+                        selectedBatchFee = "₹299"
+                    } else {
+                        selectedBatchName = "TGT 2026 GS Batch"
+                        selectedBatchFee = "₹99"
+                    }
+                    showPaymentDialog = true
+                }
             }
         }
     }
@@ -313,6 +341,7 @@ fun MedhaviHomeScreen() {
             goBack()
         } else {
             selectedTab = 0
+            isInsideFullBatchFlow = false
         }
     }
 
@@ -328,6 +357,7 @@ fun MedhaviHomeScreen() {
                                 selectedTab = index
                                 activePage = PAGE_ROOT
                                 backStack.clear()
+                                isInsideFullBatchFlow = false
                             },
                             icon = {
                                 Text(
@@ -344,21 +374,44 @@ fun MedhaviHomeScreen() {
         }
     ) { innerPadding ->
         when (activePage) {
+            // 🎯 होम साइंस / फुल बैच पोर्टल
             PAGE_COMPLETE_BATCH -> BatchPortalContent(
                 innerPadding = innerPadding,
                 title = "🎯 TGT 2026 होम साइंस पोर्टल",
                 subtitle = "अपनी सुविधानुसार नीचे दिए गए विकल्प को चुनें",
                 cards = completeBatchCards(),
                 onBack = { goBack() },
-                onOpenPage = { openPage(it) }
+                onOpenPage = { targetPage ->
+                    isInsideFullBatchFlow = true // 🔥 यहाँ से कहीं भी जाने पर फुल बैच का फ्लो बना रहेगा
+                    if (targetPage == PAGE_VIDEO_CLASSES) {
+                        currentVideoDatabasePath = "batch_video/home_science"
+                        currentVideoBatchTitle = "Home Science Classes (80 Lectures)"
+                        openPage(PAGE_DYNAMIC_VIDEO_LIST)
+                    } else {
+                        openPage(targetPage)
+                    }
+                }
             )
+            // 🎯 जीएस बैच पोर्टल
             PAGE_GS_BATCH -> BatchPortalContent(
                 innerPadding = innerPadding,
                 title = "🎯 TGT 2026 GS पोर्टल",
                 subtitle = "General Studies की पूरी तैयारी एक ही स्थान पर",
                 cards = gsBatchCards(),
                 onBack = { goBack() },
-                onOpenPage = { openPage(it) }
+                onOpenPage = { targetPage ->
+                    // 🔥 अगर छात्र पहले से फुल बैच के फ्लो से आया है तो उसे true ही रहने दें
+                    if (!isInsideFullBatchFlow && !backStack.contains(PAGE_COMPLETE_BATCH)) {
+                        isInsideFullBatchFlow = false
+                    }
+                    if (targetPage == PAGE_VIDEO_CLASSES) {
+                        currentVideoDatabasePath = "batch_video/gs_batch"
+                        currentVideoBatchTitle = "General Studies Classes"
+                        openPage(PAGE_DYNAMIC_VIDEO_LIST)
+                    } else {
+                        openPage(targetPage)
+                    }
+                }
             )
             PAGE_FREE_TESTS -> PortalListContent(
                 innerPadding = innerPadding,
@@ -414,15 +467,68 @@ fun MedhaviHomeScreen() {
                 entries = videoClasses(),
                 onBack = { goBack() },
                 onItemClick = { videoItem ->
-                    currentVideoTitle = videoItem.title
-                    currentVideoUrl = videoItem.testUrl
-                    openPage(PAGE_VIDEO_PLAYER)
+                    currentVideoDatabasePath = videoItem.testUrl.ifBlank { "batch_video/home_science" }
+                    currentVideoBatchTitle = videoItem.title
+                    if (currentVideoDatabasePath.contains("home_science")) {
+                        isInsideFullBatchFlow = true
+                    }
+                    openPage(PAGE_DYNAMIC_VIDEO_LIST)
                 }
             )
+            // 🎥 वीडियो लिस्ट स्क्रीन (जहाँ फुल बैच फ्लो चेक करके ₹299 पॉप-अप आता है)
+            PAGE_DYNAMIC_VIDEO_LIST -> {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                FirebaseVideoClassListScreen(
+                    innerPadding = innerPadding,
+                    databasePath = currentVideoDatabasePath,
+                    batchTitle = currentVideoBatchTitle,
+                    onBackClick = { goBack() },
+                    onClassClick = { classItem, videoIndex ->
+                        val cleanStatus = classItem.status.trim().uppercase()
+                        val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START")
+
+                        // 🔒 नियम 1: पहली 2 क्लासेज फ्री डेमो (Index 0 और 1)
+                        val isFreeDemoVideo = videoIndex in 0..1
+
+                        // 🔥 नियम 2: अगर फुल बैच फ्लो सक्रिय है या बैक-स्टैक में PAGE_COMPLETE_BATCH है, तो यह Full Batch माना जाएगा
+                        val isFullBatchVideo = isInsideFullBatchFlow ||
+                                backStack.contains(PAGE_COMPLETE_BATCH) ||
+                                activePage == PAGE_COMPLETE_BATCH ||
+                                currentVideoDatabasePath.contains("home_science")
+
+                        // 🔒 नियम 3: अनलॉक होने की शर्तें
+                        val isUnlocked = isFreeDemoVideo || hasFullBatchAccess || (!isFullBatchVideo && hasGsAccess)
+
+                        if (isLive && classItem.videoUrl.isNotBlank()) {
+                            if (isUnlocked) {
+                                currentVideoTitle = classItem.title
+                                currentVideoUrl = classItem.videoUrl
+                                openPage(PAGE_VIDEO_PLAYER)
+                            } else {
+                                // 💰 अगर फुल बैच के रास्ते से आया है, तो हमेशा ₹299 का पॉप-अप आएगा
+                                if (isFullBatchVideo) {
+                                    selectedBatchName = "TGT 2026 Full Batch (Home Science + GS)"
+                                    selectedBatchFee = "₹299"
+                                } else {
+                                    selectedBatchName = "TGT 2026 GS Batch"
+                                    selectedBatchFee = "₹99"
+                                }
+                                showPaymentDialog = true
+                            }
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "यह क्लास अभी जल्द लाइव होगी!",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            }
             PAGE_VIDEO_PLAYER -> VideoPlayerScreen(
                 videoTitle = currentVideoTitle,
                 onBackClick = { goBack() },
-                onNextVideoClick = { /* अगली वीडियो का एक्शन */ }
+                onNextVideoClick = { }
             )
             PAGE_PDF_NOTES -> PortalListContent(
                 innerPadding = innerPadding,
@@ -432,14 +538,28 @@ fun MedhaviHomeScreen() {
                 entries = pdfNotes(),
                 onBack = { goBack() }
             )
-            PAGE_HTML_TEST -> NativeQuizScreen(
-                innerPadding = innerPadding,
-                testId = if (currentTestUrl.isNotBlank()) currentTestUrl else "test41",
-                testTitle = currentTestTitle,
-                studentName = "Ajit",
-                onBack = { goBack() }
-            )
-            else -> when (selectedTab) { // ✅ 'else' को हमेशा अंत में रखा गया है
+            PAGE_HTML_TEST -> {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val sharedPref = remember {
+                    context.getSharedPreferences("MedhaviUserProfile", android.content.Context.MODE_PRIVATE)
+                }
+                val firebaseUser = remember {
+                    com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                }
+
+                val profileStudentName = sharedPref.getString("user_name", null)?.takeIf { it.isNotBlank() }
+                    ?: firebaseUser?.displayName?.takeIf { it.isNotBlank() }
+                    ?: "student"
+
+                NativeQuizScreen(
+                    innerPadding = innerPadding,
+                    testId = if (currentTestUrl.isNotBlank()) currentTestUrl else "test41",
+                    testTitle = currentTestTitle,
+                    studentName = profileStudentName,
+                    onBack = { goBack() }
+                )
+            }
+            else -> when (selectedTab) {
                 0 -> HomeContent(innerPadding) { openPage(it) }
                 1 -> CoursesContent(innerPadding) { openPage(it) }
                 2 -> TestsContent(innerPadding) { openPage(it) }
@@ -461,8 +581,189 @@ fun MedhaviHomeScreen() {
     }
 }
 
-/* -------------------- TEST TAB -------------------- */
+// 🎥 फायरबेस से वीडियो लिस्ट फेच करने वाली स्क्रीन
+@Composable
+private fun FirebaseVideoClassListScreen(
+    innerPadding: PaddingValues,
+    databasePath: String,
+    batchTitle: String,
+    onBackClick: () -> Unit,
+    onClassClick: (VideoClassItem, Int) -> Unit
+) {
+    var classList by remember { mutableStateOf<List<VideoClassItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
 
+    LaunchedEffect(databasePath) {
+        val dbRef = com.google.firebase.database.FirebaseDatabase.getInstance().getReference(databasePath)
+        dbRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<VideoClassItem>()
+                for (child in snapshot.children) {
+                    val id = child.key ?: ""
+                    val title = child.child("title").getValue(String::class.java) ?: ""
+                    val videoUrl = child.child("videoUrl").getValue(String::class.java) ?: ""
+                    val status = child.child("status").getValue(String::class.java) ?: "COMING SOON"
+
+                    val order = when (val orderVal = child.child("order").value) {
+                        is Long -> orderVal.toInt()
+                        is Int -> orderVal
+                        is String -> orderVal.toIntOrNull() ?: 0
+                        else -> 0
+                    }
+
+                    list.add(VideoClassItem(id, title, videoUrl, status, order))
+                }
+                classList = list.sortedBy { it.order }
+                isLoading = false
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                isLoading = false
+            }
+        })
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .padding(innerPadding),
+        contentPadding = PaddingValues(bottom = 28.dp)
+    ) {
+        item {
+            HomeBrandHeader(badgeText = batchTitle)
+        }
+
+        item {
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(text = "🎥 वीडियो क्लासेज (${classList.size})", color = NavyBlue, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "डेटाबेस से लाइव फेच की गई क्लासेज", color = GreyText, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(thickness = 2.dp, color = NavyBlue)
+            }
+        }
+
+        if (isLoading) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = RoyalBlue)
+                }
+            }
+        } else if (classList.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "इस बैच में अभी कोई वीडियो क्लास उपलब्ध नहीं है।", color = GreyText)
+                }
+            }
+        } else {
+            items(classList.size) { index ->
+                val item = classList[index]
+                VideoClassCardRow(
+                    item = item,
+                    onClick = { onClassClick(item, index) }
+                )
+            }
+        }
+
+        item {
+            BottomBackButton(onClick = onBackClick)
+        }
+    }
+}
+
+// 📋 वीडियो क्लास की रो डिजाइन
+@Composable
+private fun VideoClassCardRow(
+    item: VideoClassItem,
+    onClick: () -> Unit
+) {
+    val isLive = item.status.trim().uppercase() == "LIVE"
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White,
+        shadowElevation = 2.dp,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (isLive) "▶️" else "⏳",
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(end = 12.dp)
+                )
+                Column {
+                    Text(
+                        text = item.title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = if (isLive) "क्लिक करके वीडियो देखें" else "जल्द आ रही है",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isLive) Color(0xFFDCFCE7) else Color(0xFFFEF9C3),
+                border = BorderStroke(1.dp, if (isLive) Color(0xFF86EFAC) else Color(0xFFFDE047))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isLive) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(Color(0xFF15803D), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    }
+                    Text(
+                        text = if (isLive) "Live Now" else "Coming Soon",
+                        color = if (isLive) Color(0xFF15803D) else Color(0xFF854D0E),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ✅ टेस्ट टैब स्क्रीन
 @Composable
 private fun TestsContent(
     innerPadding: PaddingValues,
@@ -617,10 +918,7 @@ private fun TestPortalCard(
     }
 }
 
-var isInsideFullBatchFlow by mutableStateOf(false)
-
-/* -------------------- COURSES -------------------- */
-
+// 🎯 कोर्सेज टैब स्क्रीन
 @Composable
 private fun CoursesContent(
     innerPadding: PaddingValues,
@@ -645,11 +943,6 @@ private fun CoursesContent(
             ServiceGrid(
                 services = courses,
                 onServiceClick = { service ->
-                    if (service.page == PAGE_COMPLETE_BATCH) {
-                        isInsideFullBatchFlow = true
-                    } else if (service.page == PAGE_GS_BATCH) {
-                        isInsideFullBatchFlow = false
-                    }
                     onOpenPage(service.page)
                 }
             )
@@ -657,8 +950,7 @@ private fun CoursesContent(
     }
 }
 
-/* -------------------- HOME -------------------- */
-
+// 🏠 होम टैब स्क्रीन
 @Composable
 private fun HomeContent(
     innerPadding: PaddingValues,
@@ -666,7 +958,6 @@ private fun HomeContent(
 ) {
     val services = listOf(
         HomeService("📝", "Free Online Tests", "मॉक टेस्ट सीरीज", page = PAGE_FREE_TESTS),
-        HomeService("▶️", "Free Video Classes", "वीडियो लेक्चर्स", page = PAGE_VIDEO_CLASSES),
         HomeService("📚", "Free PDF Notes", "डाउनलोड नोट्स", page = PAGE_PDF_NOTES),
         HomeService("🎯", "TGT 2026 Batch", "Home Science + GS", true, PAGE_COMPLETE_BATCH),
         HomeService("🎯", "TGT 2026 GS Batch", "Complete General Studies", true, PAGE_GS_BATCH),
@@ -684,12 +975,6 @@ private fun HomeContent(
                 services = services,
                 modifier = Modifier.padding(horizontal = 20.dp),
                 onServiceClick = { service ->
-                    if (service.page == PAGE_COMPLETE_BATCH) {
-                        isInsideFullBatchFlow = true
-                    } else if (service.page == PAGE_GS_BATCH) {
-                        isInsideFullBatchFlow = false
-                    }
-
                     if (service.page != PAGE_ROOT) onOpenPage(service.page)
                 }
             )
@@ -724,7 +1009,7 @@ private fun HomeContent(
     }
 }
 
-/* -------------------- BATCH DATA -------------------- */
+// 📦 बैच पोर्टल कार्ड्स डेटा
 private fun completeBatchCards() = listOf(
     PortalCardData("📚", "Home Science", "वीडियो क्लासेस एवं टेस्ट", PAGE_VIDEO_CLASSES),
     PortalCardData("📝", "20 Full Mock Tests", "ऑनलाइन टेस्ट सीरीज", PAGE_FULL_TESTS),
@@ -738,8 +1023,7 @@ private fun gsBatchCards() = listOf(
     PortalCardData("📚", "GS Full Mock Tests", "संपूर्ण GS अभ्यास", PAGE_FULL_TESTS)
 )
 
-/* -------------------- GS SUBJECT GRID -------------------- */
-
+// 📚 GS विषय सूची
 private fun gsSubjects() = listOf(
     GsSubject("📰", "समसामयिकी (Current Affairs)", "राष्ट्रीय/राज्य घटनाएँ, चर्चित व्यक्ति व खेल", 1, "current_affairs"),
     GsSubject("📜", "भारतीय इतिहास व स्वतंत्रता आंदोलन", "प्राचीन, मध्यकालीन व आधुनिक इतिहास", 2, "history"),
@@ -917,8 +1201,7 @@ private fun SubjectCard(
     }
 }
 
-/* -------------------- SUBJECT TEST LIST -------------------- */
-
+// 📝 विषयवार टेस्ट लिस्ट स्क्रीन
 @Composable
 private fun SubjectTestsContent(
     innerPadding: PaddingValues,
@@ -960,7 +1243,6 @@ private fun SubjectTestsContent(
         item { BottomBackButton(onBack) }
     }
 }
-
 
 @Composable
 private fun AttractiveTestRow(
@@ -1020,10 +1302,10 @@ private fun AttractiveTestRow(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .clickable { onClick() },
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(12.dp),
         color = Color.White,
         shadowElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
     ) {
         Row(
             modifier = Modifier
@@ -1060,9 +1342,9 @@ private fun AttractiveTestRow(
             Spacer(modifier = Modifier.width(8.dp))
 
             Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = badgeBg,
-                border = androidx.compose.foundation.BorderStroke(1.dp, badgeBorder)
+                border = BorderStroke(1.dp, badgeBorder)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -1072,7 +1354,7 @@ private fun AttractiveTestRow(
                         Box(
                             modifier = Modifier
                                 .size(6.dp)
-                                .background(badgeTextColor, androidx.compose.foundation.shape.CircleShape)
+                                .background(badgeTextColor, CircleShape)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                     }
@@ -1113,9 +1395,9 @@ private fun defaultGsSubjectTest(subject: GsSubject) = listOf(
 )
 
 private fun videoClasses() = listOf(
-    PortalListItem("Home Science Classes", "रिकॉर्डेड वीडियो लेक्चर", "WATCH"),
-    PortalListItem("General Studies Classes", "विषयवार वीडियो लेक्चर", "WATCH"),
-    PortalListItem("Free YouTube Classes", "सभी विद्यार्थियों के लिए", "WATCH")
+    PortalListItem("Home Science Classes", "रिकॉर्डेड वीडियो लेक्चर", "WATCH", "batch_video/home_science"),
+    PortalListItem("General Studies Classes", "विषयवार वीडियो लेक्चर", "WATCH", "batch_video/gs_batch"),
+    PortalListItem("Free YouTube Classes", "सभी विद्यार्थियों के लिए", "WATCH", "youtube_free")
 )
 
 private fun pdfNotes() = listOf(
@@ -1286,6 +1568,7 @@ private fun ClassesContent(
     }
 }
 
+// 👤 प्रोफाइल स्क्रीन और डेटामैनेजर
 @Composable
 private fun ProfileContent(
     innerPadding: PaddingValues,
@@ -1374,21 +1657,21 @@ private fun ProfileContent(
                         contentDescription = "Profile Photo",
                         modifier = Modifier
                             .size(110.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .border(2.dp, GreyBorder, androidx.compose.foundation.shape.CircleShape),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            .clip(CircleShape)
+                            .border(2.dp, GreyBorder, CircleShape),
+                        contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .size(110.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .clip(CircleShape)
                             .background(NavyBlue),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = userName.take(1).uppercase(),
-                            color = androidx.compose.ui.graphics.Color.White,
+                            color = Color.White,
                             fontSize = 42.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1398,7 +1681,7 @@ private fun ProfileContent(
                 Box(
                     modifier = Modifier
                         .size(34.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .clip(CircleShape)
                         .background(AccentYellow)
                         .clickable { imagePickerLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
@@ -1412,19 +1695,19 @@ private fun ProfileContent(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(2.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("सक्रिय बैच (My Batches)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
                     Spacer(modifier = Modifier.height(8.dp))
                     when {
                         hasFullBatch -> {
-                            Text("✓ TGT 2026 Full Batch (Home Science + GS)", color = androidx.compose.ui.graphics.Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("✓ TGT 2026 Full Batch (Home Science + GS)", color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         }
                         hasGs -> {
-                            Text("✓ TGT 2026 GS Batch", color = androidx.compose.ui.graphics.Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("✓ TGT 2026 GS Batch", color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         }
                         else -> {
                             Text("कोई पेड बैच सक्रिय नहीं है (Free Demo Active)", color = GreyText, fontSize = 14.sp)
@@ -1438,9 +1721,9 @@ private fun ProfileContent(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(2.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     ProfileFieldItemRow("पूरा नाम", userName, isEditing) { userName = it }
@@ -1485,12 +1768,12 @@ private fun ProfileContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFFD32F2F))
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
             ) {
                 Text(
                     text = "लॉगआउट (Logout)",
-                    color = androidx.compose.ui.graphics.Color.White,
+                    color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -1514,7 +1797,7 @@ private fun ProfileFieldItemRow(
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
-                placeholder = { Text(placeholder, fontSize = 14.sp, color = androidx.compose.ui.graphics.Color.LightGray) },
+                placeholder = { Text(placeholder, fontSize = 14.sp, color = Color.LightGray) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
@@ -1523,13 +1806,14 @@ private fun ProfileFieldItemRow(
                 text = if (value.isBlank()) "दर्ज नहीं है" else value,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (value.isBlank()) androidx.compose.ui.graphics.Color.LightGray else DarkText,
+                color = if (value.isBlank()) Color.LightGray else DarkText,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
     }
 }
 
+// 🏛️ टॉप हेडर
 @Composable
 private fun HeaderSection() {
     Box(

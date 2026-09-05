@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "881094508649",
+    "firebase_url": "https://medhavi-study-point-default-rtdb.firebaseio.com",
+    "project_id": "medhavi-study-point",
+    "storage_bucket": "medhavi-study-point.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:881094508649:android:3c5f444cd7f6f0bb2ba2f8",
+        "android_client_info": {
+          "package_name": "com.medhavistudypoint.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "881094508649-6thprp601b74grflis51q7m3cn4lvk95.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.medhavistudypoint.app",
+            "certificate_hash": "363c95c5ea4eb361581dc903a93026fa1d58e483"
+          }
+        },
+        {
+          "client_id": "881094508649-1kco6ddofh6o2efmm8nt37as2pcdq3en.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC8PTha7TSzEl858WgODiOk7ZqS1jmUuCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "881094508649-1kco6ddofh6o2efmm8nt37as2pcdq3en.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
