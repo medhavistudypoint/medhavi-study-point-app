@@ -170,7 +170,6 @@ fun MedhaviHomeScreen() {
     var selectedBatchName by remember { mutableStateOf("") }
     var selectedBatchFee by remember { mutableStateOf("") }
 
-    // 🔥 फुल बैच रास्ते का मुख्य फ्लैग
     var isInsideFullBatchFlow by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -276,16 +275,14 @@ fun MedhaviHomeScreen() {
         }
         if (activePage == PAGE_ROOT) {
             selectedSubject = null
-            isInsideFullBatchFlow = false // होम स्क्रीन पर आने पर ही रिसेट होगा
+            isInsideFullBatchFlow = false
         }
     }
 
-    // 🔒 टेस्ट लॉक और पेमेंट सिस्टम (सुधारा हुआ)
     val onUniversalTestClick: (PortalListItem) -> Unit = { item ->
         val cleanStatus = item.status.trim().uppercase()
         val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START")
         if (isLive) {
-            // 🟢 1. फ्री टेस्ट की जांच (यह हमेशा हर किसी के लिए फ्री रहेगा)
             val isFreeSectionTest = activePage == PAGE_FREE_TESTS ||
                     freeTestsList.any { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
 
@@ -294,7 +291,6 @@ fun MedhaviHomeScreen() {
                 currentTestUrl = item.testUrl
                 openPage(PAGE_HTML_TEST)
             } else {
-                // 🟡 2. पेड बैच टेस्ट्स के इंडेक्स
                 val hsIndex = homeScienceTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
                 val mockIndex = fullMockTestsList.indexOfFirst { it.title == item.title || (it.testUrl.isNotBlank() && it.testUrl == item.testUrl) }
 
@@ -374,7 +370,6 @@ fun MedhaviHomeScreen() {
         }
     ) { innerPadding ->
         when (activePage) {
-            // 🎯 होम साइंस / फुल बैच पोर्टल
             PAGE_COMPLETE_BATCH -> BatchPortalContent(
                 innerPadding = innerPadding,
                 title = "🎯 TGT 2026 होम साइंस पोर्टल",
@@ -382,7 +377,7 @@ fun MedhaviHomeScreen() {
                 cards = completeBatchCards(),
                 onBack = { goBack() },
                 onOpenPage = { targetPage ->
-                    isInsideFullBatchFlow = true // 🔥 यहाँ से कहीं भी जाने पर फुल बैच का फ्लो बना रहेगा
+                    isInsideFullBatchFlow = true
                     if (targetPage == PAGE_VIDEO_CLASSES) {
                         currentVideoDatabasePath = "batch_video/home_science"
                         currentVideoBatchTitle = "Home Science Classes (80 Lectures)"
@@ -392,7 +387,6 @@ fun MedhaviHomeScreen() {
                     }
                 }
             )
-            // 🎯 जीएस बैच पोर्टल
             PAGE_GS_BATCH -> BatchPortalContent(
                 innerPadding = innerPadding,
                 title = "🎯 TGT 2026 GS पोर्टल",
@@ -400,7 +394,6 @@ fun MedhaviHomeScreen() {
                 cards = gsBatchCards(),
                 onBack = { goBack() },
                 onOpenPage = { targetPage ->
-                    // 🔥 अगर छात्र पहले से फुल बैच के फ्लो से आया है तो उसे true ही रहने दें
                     if (!isInsideFullBatchFlow && !backStack.contains(PAGE_COMPLETE_BATCH)) {
                         isInsideFullBatchFlow = false
                     }
@@ -419,6 +412,7 @@ fun MedhaviHomeScreen() {
                 title = "Free Online Tests",
                 subtitle = "निशुल्क ऑनलाइन मॉक टेस्ट सीरीज",
                 entries = if (freeTestsList.isNotEmpty()) freeTestsList else defaultFreeTests(),
+                hasAccess = true,
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
@@ -428,6 +422,7 @@ fun MedhaviHomeScreen() {
                 title = "Home Science Daily Tests",
                 subtitle = "Topic Wise Practice Tests",
                 entries = if (homeScienceTestsList.isNotEmpty()) homeScienceTestsList else defaultHomeScienceTest(),
+                hasAccess = hasFullBatchAccess,
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
@@ -446,6 +441,7 @@ fun MedhaviHomeScreen() {
                     innerPadding = innerPadding,
                     subject = currentSubj,
                     tests = liveTests,
+                    hasAccess = hasFullBatchAccess || hasGsAccess,
                     onBack = { goBack() },
                     onTestClick = onUniversalTestClick
                 )
@@ -456,6 +452,7 @@ fun MedhaviHomeScreen() {
                 title = "Full Mock Tests (125 Q)",
                 subtitle = "Home Science + General Studies",
                 entries = if (fullMockTestsList.isNotEmpty()) fullMockTestsList else defaultFullMockTest(),
+                hasAccess = hasFullBatchAccess,
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
@@ -465,6 +462,7 @@ fun MedhaviHomeScreen() {
                 title = "Video Classes",
                 subtitle = "Batch के वीडियो लेक्चर",
                 entries = videoClasses(),
+                hasAccess = true,
                 onBack = { goBack() },
                 onItemClick = { videoItem ->
                     currentVideoDatabasePath = videoItem.testUrl.ifBlank { "batch_video/home_science" }
@@ -475,28 +473,27 @@ fun MedhaviHomeScreen() {
                     openPage(PAGE_DYNAMIC_VIDEO_LIST)
                 }
             )
-            // 🎥 वीडियो लिस्ट स्क्रीन (जहाँ फुल बैच फ्लो चेक करके ₹299 पॉप-अप आता है)
             PAGE_DYNAMIC_VIDEO_LIST -> {
                 val context = androidx.compose.ui.platform.LocalContext.current
+                val isFullBatchVideoList = isInsideFullBatchFlow ||
+                        backStack.contains(PAGE_COMPLETE_BATCH) ||
+                        activePage == PAGE_COMPLETE_BATCH ||
+                        currentVideoDatabasePath.contains("home_science")
+
+                val videoBatchAccess = if (isFullBatchVideoList) hasFullBatchAccess else (hasFullBatchAccess || hasGsAccess)
+
                 FirebaseVideoClassListScreen(
                     innerPadding = innerPadding,
                     databasePath = currentVideoDatabasePath,
                     batchTitle = currentVideoBatchTitle,
+                    hasAccess = videoBatchAccess,
                     onBackClick = { goBack() },
                     onClassClick = { classItem, videoIndex ->
                         val cleanStatus = classItem.status.trim().uppercase()
                         val isLive = (cleanStatus == "LIVE" || cleanStatus == "LIVE NOW" || cleanStatus == "START")
 
-                        // 🔒 नियम 1: पहली 2 क्लासेज फ्री डेमो (Index 0 और 1)
                         val isFreeDemoVideo = videoIndex in 0..1
-
-                        // 🔥 नियम 2: अगर फुल बैच फ्लो सक्रिय है या बैक-स्टैक में PAGE_COMPLETE_BATCH है, तो यह Full Batch माना जाएगा
-                        val isFullBatchVideo = isInsideFullBatchFlow ||
-                                backStack.contains(PAGE_COMPLETE_BATCH) ||
-                                activePage == PAGE_COMPLETE_BATCH ||
-                                currentVideoDatabasePath.contains("home_science")
-
-                        // 🔒 नियम 3: अनलॉक होने की शर्तें
+                        val isFullBatchVideo = isFullBatchVideoList
                         val isUnlocked = isFreeDemoVideo || hasFullBatchAccess || (!isFullBatchVideo && hasGsAccess)
 
                         if (isLive && classItem.videoUrl.isNotBlank()) {
@@ -505,7 +502,6 @@ fun MedhaviHomeScreen() {
                                 currentVideoUrl = classItem.videoUrl
                                 openPage(PAGE_VIDEO_PLAYER)
                             } else {
-                                // 💰 अगर फुल बैच के रास्ते से आया है, तो हमेशा ₹299 का पॉप-अप आएगा
                                 if (isFullBatchVideo) {
                                     selectedBatchName = "TGT 2026 Full Batch (Home Science + GS)"
                                     selectedBatchFee = "₹299"
@@ -527,6 +523,7 @@ fun MedhaviHomeScreen() {
             }
             PAGE_VIDEO_PLAYER -> VideoPlayerScreen(
                 videoTitle = currentVideoTitle,
+                videoUrl = currentVideoUrl, // 👈 यहाँ नया वीडियो लिंक जा रहा है
                 onBackClick = { goBack() },
                 onNextVideoClick = { }
             )
@@ -536,6 +533,7 @@ fun MedhaviHomeScreen() {
                 title = "PDF Notes",
                 subtitle = "डाउनलोड करने योग्य अध्ययन सामग्री",
                 entries = pdfNotes(),
+                hasAccess = hasFullBatchAccess || hasGsAccess,
                 onBack = { goBack() }
             )
             PAGE_HTML_TEST -> {
@@ -549,7 +547,7 @@ fun MedhaviHomeScreen() {
 
                 val profileStudentName = sharedPref.getString("user_name", null)?.takeIf { it.isNotBlank() }
                     ?: firebaseUser?.displayName?.takeIf { it.isNotBlank() }
-                    ?: "student"
+                    ?: "विद्यार्थी"
 
                 NativeQuizScreen(
                     innerPadding = innerPadding,
@@ -587,6 +585,7 @@ private fun FirebaseVideoClassListScreen(
     innerPadding: PaddingValues,
     databasePath: String,
     batchTitle: String,
+    hasAccess: Boolean = false,
     onBackClick: () -> Unit,
     onClassClick: (VideoClassItem, Int) -> Unit
 ) {
@@ -601,7 +600,14 @@ private fun FirebaseVideoClassListScreen(
                 for (child in snapshot.children) {
                     val id = child.key ?: ""
                     val title = child.child("title").getValue(String::class.java) ?: ""
-                    val videoUrl = child.child("videoUrl").getValue(String::class.java) ?: ""
+
+                    // 🎬 Firebase की किसी भी संभावित Key से लिंक फेच करने का कोड
+                    val videoUrl = child.child("videoUrl").getValue(String::class.java)
+                        ?: child.child("url").getValue(String::class.java)
+                        ?: child.child("link").getValue(String::class.java)
+                        ?: child.child("videourl").getValue(String::class.java)
+                        ?: ""
+
                     val status = child.child("status").getValue(String::class.java) ?: "COMING SOON"
 
                     val order = when (val orderVal = child.child("order").value) {
@@ -669,8 +675,10 @@ private fun FirebaseVideoClassListScreen(
         } else {
             items(classList.size) { index ->
                 val item = classList[index]
+                val isLocked = (index >= 2) && !hasAccess
                 VideoClassCardRow(
                     item = item,
+                    isLocked = isLocked,
                     onClick = { onClassClick(item, index) }
                 )
             }
@@ -686,6 +694,7 @@ private fun FirebaseVideoClassListScreen(
 @Composable
 private fun VideoClassCardRow(
     item: VideoClassItem,
+    isLocked: Boolean = false,
     onClick: () -> Unit
 ) {
     val isLive = item.status.trim().uppercase() == "LIVE"
@@ -734,29 +743,42 @@ private fun VideoClassCardRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = if (isLive) Color(0xFFDCFCE7) else Color(0xFFFEF9C3),
-                border = BorderStroke(1.dp, if (isLive) Color(0xFF86EFAC) else Color(0xFFFDE047))
+            // 👉 स्टेटस के बगल में 🔒 लॉक
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isLive) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(Color(0xFF15803D), CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                    }
+                if (isLocked) {
                     Text(
-                        text = if (isLive) "Live Now" else "Coming Soon",
-                        color = if (isLive) Color(0xFF15803D) else Color(0xFF854D0E),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "🔒",
+                        fontSize = 14.sp
                     )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isLive) Color(0xFFDCFCE7) else Color(0xFFFEF9C3),
+                    border = BorderStroke(1.dp, if (isLive) Color(0xFF86EFAC) else Color(0xFFFDE047))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isLive) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(Color(0xFF15803D), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                        }
+                        Text(
+                            text = if (isLive) "Live Now" else "Coming Soon",
+                            color = if (isLive) Color(0xFF15803D) else Color(0xFF854D0E),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -918,7 +940,6 @@ private fun TestPortalCard(
     }
 }
 
-// 🎯 कोर्सेज टैब स्क्रीन
 @Composable
 private fun CoursesContent(
     innerPadding: PaddingValues,
@@ -950,7 +971,6 @@ private fun CoursesContent(
     }
 }
 
-// 🏠 होम टैब स्क्रीन
 @Composable
 private fun HomeContent(
     innerPadding: PaddingValues,
@@ -1009,7 +1029,6 @@ private fun HomeContent(
     }
 }
 
-// 📦 बैच पोर्टल कार्ड्स डेटा
 private fun completeBatchCards() = listOf(
     PortalCardData("📚", "Home Science", "वीडियो क्लासेस एवं टेस्ट", PAGE_VIDEO_CLASSES),
     PortalCardData("📝", "20 Full Mock Tests", "ऑनलाइन टेस्ट सीरीज", PAGE_FULL_TESTS),
@@ -1023,7 +1042,6 @@ private fun gsBatchCards() = listOf(
     PortalCardData("📚", "GS Full Mock Tests", "संपूर्ण GS अभ्यास", PAGE_FULL_TESTS)
 )
 
-// 📚 GS विषय सूची
 private fun gsSubjects() = listOf(
     GsSubject("📰", "समसामयिकी (Current Affairs)", "राष्ट्रीय/राज्य घटनाएँ, चर्चित व्यक्ति व खेल", 1, "current_affairs"),
     GsSubject("📜", "भारतीय इतिहास व स्वतंत्रता आंदोलन", "प्राचीन, मध्यकालीन व आधुनिक इतिहास", 2, "history"),
@@ -1201,12 +1219,12 @@ private fun SubjectCard(
     }
 }
 
-// 📝 विषयवार टेस्ट लिस्ट स्क्रीन
 @Composable
 private fun SubjectTestsContent(
     innerPadding: PaddingValues,
     subject: GsSubject,
     tests: List<PortalListItem>,
+    hasAccess: Boolean = false,
     onBack: () -> Unit,
     onTestClick: (PortalListItem) -> Unit = {}
 ) {
@@ -1234,9 +1252,12 @@ private fun SubjectTestsContent(
             Spacer(modifier = Modifier.height(14.dp))
         }
 
-        items(tests) { test ->
+        items(tests.size) { index ->
+            val test = tests[index]
+            val isLocked = (index >= 2) && !hasAccess
             AttractiveTestRow(
                 item = test,
+                isLocked = isLocked,
                 onClick = { onTestClick(test) }
             )
         }
@@ -1247,6 +1268,7 @@ private fun SubjectTestsContent(
 @Composable
 private fun AttractiveTestRow(
     item: PortalListItem,
+    isLocked: Boolean = false,
     onClick: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1341,29 +1363,41 @@ private fun AttractiveTestRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = badgeBg,
-                border = BorderStroke(1.dp, badgeBorder)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (showDot) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(badgeTextColor, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                    }
+                if (isLocked) {
                     Text(
-                        text = badgeText,
-                        color = badgeTextColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "🔒",
+                        fontSize = 14.sp
                     )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = badgeBg,
+                    border = BorderStroke(1.dp, badgeBorder)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (showDot) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(badgeTextColor, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                        }
+                        Text(
+                            text = badgeText,
+                            color = badgeTextColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -1514,6 +1548,7 @@ private fun PortalListContent(
     title: String,
     subtitle: String,
     entries: List<PortalListItem>,
+    hasAccess: Boolean = false,
     onBack: () -> Unit,
     onItemClick: (PortalListItem) -> Unit = {}
 ) {
@@ -1535,9 +1570,12 @@ private fun PortalListContent(
             }
         }
 
-        items(entries) { listItem ->
+        items(entries.size) { index ->
+            val listItem = entries[index]
+            val isLocked = (index >= 2) && !hasAccess
             AttractiveTestRow(
                 item = listItem,
+                isLocked = isLocked,
                 onClick = { onItemClick(listItem) }
             )
         }
@@ -1568,7 +1606,6 @@ private fun ClassesContent(
     }
 }
 
-// 👤 प्रोफाइल स्क्रीन और डेटामैनेजर
 @Composable
 private fun ProfileContent(
     innerPadding: PaddingValues,
@@ -1813,7 +1850,6 @@ private fun ProfileFieldItemRow(
     }
 }
 
-// 🏛️ टॉप हेडर
 @Composable
 private fun HeaderSection() {
     Box(
