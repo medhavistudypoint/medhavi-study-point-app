@@ -66,4 +66,7 @@ dependencies {
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
     // Google ML Kit Translation (हिंदी से इंग्लिश के लिए)
     implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.1")
+    // 🔔 Firebase Cloud Messaging (Push Notifications)
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
 }

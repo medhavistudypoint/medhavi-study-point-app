@@ -1,6 +1,8 @@
 package com.medhavistudypoint.app
 
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -39,12 +41,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
+import com.google.firebase.messaging.FirebaseMessaging
 import com.medhavistudypoint.app.ui.theme.MedhaviStudyPointTheme
 
 // 🎨 ऐप के कलर पैलेट (App Color Palette)
@@ -73,6 +78,7 @@ private const val PAGE_SUBJECT_TESTS = 9
 private const val PAGE_HTML_TEST = 10
 private const val PAGE_VIDEO_PLAYER = 11
 private const val PAGE_DYNAMIC_VIDEO_LIST = 12
+private const val PAGE_INAPP_PDF = 13 // 👈 ऐप के अंदर सीधे PDF खोलने के लिए
 
 // 📊 डेटा मॉडल्स (Data Models)
 data class HomeService(
@@ -106,6 +112,7 @@ data class VideoClassItem(
     val id: String = "",
     val title: String = "",
     val videoUrl: String = "",
+    val pdfUrl: String = "",
     val status: String = "COMING SOON",
     val order: Int = 0
 )
@@ -122,27 +129,61 @@ data class GsSubject(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                101
+            )
+        }
+
+        FirebaseMessaging.getInstance().subscribeToTopic("all_students")
 
         setContent {
             MedhaviStudyPointTheme {
-                val context = androidx.compose.ui.platform.LocalContext.current
+                val context = LocalContext.current
 
                 LaunchedEffect(Unit) {
                     AuthSessionManager.init(context)
+                }
+
+                val sharedPref = remember {
+                    context.getSharedPreferences("MedhaviUserProfile", android.content.Context.MODE_PRIVATE)
                 }
 
                 var isLoggedIn by remember {
                     mutableStateOf(AuthSessionManager.isLoggedIn())
                 }
 
-                if (!isLoggedIn) {
-                    LoginScreen(
-                        onLoginSuccess = { _, _ ->
-                            isLoggedIn = true
-                        }
-                    )
-                } else {
-                    MedhaviHomeScreen()
+                var isProfileCompleted by remember {
+                    val savedName = sharedPref.getString("user_name", "") ?: ""
+                    val savedPhone = sharedPref.getString("user_phone", "") ?: ""
+                    mutableStateOf(savedName.isNotBlank() && savedPhone.length == 10)
+                }
+
+                when {
+                    !isLoggedIn -> {
+                        LoginScreen(
+                            onLoginSuccess = { _, _ ->
+                                isLoggedIn = true
+                                val name = sharedPref.getString("user_name", "") ?: ""
+                                val phone = sharedPref.getString("user_phone", "") ?: ""
+                                isProfileCompleted = (name.isNotBlank() && phone.length == 10)
+                            }
+                        )
+                    }
+
+                    !isProfileCompleted -> {
+                        ProfileSetupScreen(
+                            onProfileCompleted = {
+                                isProfileCompleted = true
+                            }
+                        )
+                    }
+
+                    else -> {
+                        MedhaviHomeScreen()
+                    }
                 }
             }
         }
@@ -152,6 +193,7 @@ class MainActivity : ComponentActivity() {
 // 🏠 होम स्क्रीन और नेविगेशन कंट्रोलर
 @Composable
 fun MedhaviHomeScreen() {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var activePage by remember { mutableIntStateOf(PAGE_ROOT) }
     var selectedSubject by remember { mutableStateOf<GsSubject?>(null) }
@@ -161,8 +203,13 @@ fun MedhaviHomeScreen() {
 
     var currentVideoTitle by remember { mutableStateOf("TGT Home Science Class") }
     var currentVideoUrl by remember { mutableStateOf("") }
+    var currentVideoPdfUrl by remember { mutableStateOf("") }
     var currentVideoDatabasePath by remember { mutableStateOf("batch_video/home_science") }
     var currentVideoBatchTitle by remember { mutableStateOf("Home Science Classes") }
+
+    // 📄 इन-ऐप PDF स्टेट
+    var currentPdfTitle by remember { mutableStateOf("Class Notes") }
+    var currentPdfViewerUrl by remember { mutableStateOf("") }
 
     var hasFullBatchAccess by remember { mutableStateOf(false) }
     var hasGsAccess by remember { mutableStateOf(false) }
@@ -171,6 +218,15 @@ fun MedhaviHomeScreen() {
     var selectedBatchFee by remember { mutableStateOf("") }
 
     var isInsideFullBatchFlow by remember { mutableStateOf(false) }
+    var showNotificationDialog by remember { mutableStateOf(false) }
+
+    val activity = context as? android.app.Activity
+    LaunchedEffect(Unit) {
+        if (activity?.intent?.getBooleanExtra("OPEN_NOTICE_DIALOG", false) == true) {
+            showNotificationDialog = true
+            activity.intent.removeExtra("OPEN_NOTICE_DIALOG")
+        }
+    }
 
     LaunchedEffect(Unit) {
         BatchAccessManager.listenBatchAccess(BatchAccessManager.BATCH_TGT_2026) { allowed ->
@@ -375,6 +431,7 @@ fun MedhaviHomeScreen() {
                 title = "🎯 TGT 2026 होम साइंस पोर्टल",
                 subtitle = "अपनी सुविधानुसार नीचे दिए गए विकल्प को चुनें",
                 cards = completeBatchCards(),
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onOpenPage = { targetPage ->
                     isInsideFullBatchFlow = true
@@ -392,6 +449,7 @@ fun MedhaviHomeScreen() {
                 title = "🎯 TGT 2026 GS पोर्टल",
                 subtitle = "General Studies की पूरी तैयारी एक ही स्थान पर",
                 cards = gsBatchCards(),
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onOpenPage = { targetPage ->
                     if (!isInsideFullBatchFlow && !backStack.contains(PAGE_COMPLETE_BATCH)) {
@@ -413,6 +471,7 @@ fun MedhaviHomeScreen() {
                 subtitle = "निशुल्क ऑनलाइन मॉक टेस्ट सीरीज",
                 entries = if (freeTestsList.isNotEmpty()) freeTestsList else defaultFreeTests(),
                 hasAccess = true,
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
@@ -423,11 +482,13 @@ fun MedhaviHomeScreen() {
                 subtitle = "Topic Wise Practice Tests",
                 entries = if (homeScienceTestsList.isNotEmpty()) homeScienceTestsList else defaultHomeScienceTest(),
                 hasAccess = hasFullBatchAccess,
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
             PAGE_GS_SECTIONAL -> GsSectionalContent(
                 innerPadding = innerPadding,
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onSubjectClick = { subject ->
                     selectedSubject = subject
@@ -442,6 +503,7 @@ fun MedhaviHomeScreen() {
                     subject = currentSubj,
                     tests = liveTests,
                     hasAccess = hasFullBatchAccess || hasGsAccess,
+                    onNotificationClick = { showNotificationDialog = true },
                     onBack = { goBack() },
                     onTestClick = onUniversalTestClick
                 )
@@ -453,6 +515,7 @@ fun MedhaviHomeScreen() {
                 subtitle = "Home Science + General Studies",
                 entries = if (fullMockTestsList.isNotEmpty()) fullMockTestsList else defaultFullMockTest(),
                 hasAccess = hasFullBatchAccess,
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onItemClick = onUniversalTestClick
             )
@@ -463,6 +526,7 @@ fun MedhaviHomeScreen() {
                 subtitle = "Batch के वीडियो लेक्चर",
                 entries = videoClasses(),
                 hasAccess = true,
+                onNotificationClick = { showNotificationDialog = true },
                 onBack = { goBack() },
                 onItemClick = { videoItem ->
                     currentVideoDatabasePath = videoItem.testUrl.ifBlank { "batch_video/home_science" }
@@ -474,7 +538,6 @@ fun MedhaviHomeScreen() {
                 }
             )
             PAGE_DYNAMIC_VIDEO_LIST -> {
-                val context = androidx.compose.ui.platform.LocalContext.current
                 val isFullBatchVideoList = isInsideFullBatchFlow ||
                         backStack.contains(PAGE_COMPLETE_BATCH) ||
                         activePage == PAGE_COMPLETE_BATCH ||
@@ -487,6 +550,7 @@ fun MedhaviHomeScreen() {
                     databasePath = currentVideoDatabasePath,
                     batchTitle = currentVideoBatchTitle,
                     hasAccess = videoBatchAccess,
+                    onNotificationClick = { showNotificationDialog = true },
                     onBackClick = { goBack() },
                     onClassClick = { classItem, videoIndex ->
                         val cleanStatus = classItem.status.trim().uppercase()
@@ -500,6 +564,7 @@ fun MedhaviHomeScreen() {
                             if (isUnlocked) {
                                 currentVideoTitle = classItem.title
                                 currentVideoUrl = classItem.videoUrl
+                                currentVideoPdfUrl = classItem.pdfUrl
                                 openPage(PAGE_VIDEO_PLAYER)
                             } else {
                                 if (isFullBatchVideo) {
@@ -512,32 +577,46 @@ fun MedhaviHomeScreen() {
                                 showPaymentDialog = true
                             }
                         } else {
-                            android.widget.Toast.makeText(
+                            Toast.makeText(
                                 context,
                                 "यह क्लास अभी जल्द लाइव होगी!",
-                                android.widget.Toast.LENGTH_SHORT
+                                Toast.LENGTH_SHORT
                             ).show()
+                        }
+                    },
+                    // 👉 सीधे ऐप के अंदर PDF व्यूअर खोलें
+                    onClassPdfClick = { classItem, isLocked ->
+                        if (isLocked) {
+                            Toast.makeText(context, "यह PDF बैच के छात्रों के लिए अनलॉक है", Toast.LENGTH_SHORT).show()
+                        } else if (classItem.pdfUrl.isNotBlank()) {
+                            currentPdfTitle = "${classItem.title} (Notes)"
+                            currentPdfViewerUrl = classItem.pdfUrl
+                            openPage(PAGE_INAPP_PDF)
+                        } else {
+                            Toast.makeText(context, "इस क्लास की PDF जल्द उपलब्ध होगी!", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
             }
             PAGE_VIDEO_PLAYER -> VideoPlayerScreen(
                 videoTitle = currentVideoTitle,
-                videoUrl = currentVideoUrl, // 👈 यहाँ नया वीडियो लिंक जा रहा है
+                videoUrl = currentVideoUrl,
+                pdfUrl = currentVideoPdfUrl,
                 onBackClick = { goBack() },
                 onNextVideoClick = { }
             )
-            PAGE_PDF_NOTES -> PortalListContent(
+            PAGE_PDF_NOTES -> PdfNotesScreen(
                 innerPadding = innerPadding,
-                headerBadge = "Study Material",
-                title = "PDF Notes",
-                subtitle = "डाउनलोड करने योग्य अध्ययन सामग्री",
-                entries = pdfNotes(),
-                hasAccess = hasFullBatchAccess || hasGsAccess,
-                onBack = { goBack() }
+                onBackClick = { goBack() },
+                onNotificationClick = { showNotificationDialog = true }
+            )
+            // 👉 इन-ऐप PDF व्यूअर स्क्रीन
+            PAGE_INAPP_PDF -> InAppPdfViewerScreen(
+                title = currentPdfTitle,
+                rawDriveUrl = currentPdfViewerUrl,
+                onBackClick = { goBack() }
             )
             PAGE_HTML_TEST -> {
-                val context = androidx.compose.ui.platform.LocalContext.current
                 val sharedPref = remember {
                     context.getSharedPreferences("MedhaviUserProfile", android.content.Context.MODE_PRIVATE)
                 }
@@ -558,9 +637,9 @@ fun MedhaviHomeScreen() {
                 )
             }
             else -> when (selectedTab) {
-                0 -> HomeContent(innerPadding) { openPage(it) }
+                0 -> HomeContent(innerPadding, onNotificationClick = { showNotificationDialog = true }) { openPage(it) }
                 1 -> CoursesContent(innerPadding) { openPage(it) }
-                2 -> TestsContent(innerPadding) { openPage(it) }
+                2 -> TestsContent(innerPadding, onNotificationClick = { showNotificationDialog = true }) { openPage(it) }
                 3 -> ClassesContent(innerPadding) { openPage(PAGE_VIDEO_CLASSES) }
                 else -> ProfileContent(
                     innerPadding = innerPadding,
@@ -570,6 +649,11 @@ fun MedhaviHomeScreen() {
             }
         }
     }
+
+    if (showNotificationDialog) {
+        NotificationDialog(onDismiss = { showNotificationDialog = false })
+    }
+
     if (showPaymentDialog) {
         PaymentRequestDialog(
             batchName = selectedBatchName,
@@ -586,8 +670,10 @@ private fun FirebaseVideoClassListScreen(
     databasePath: String,
     batchTitle: String,
     hasAccess: Boolean = false,
+    onNotificationClick: () -> Unit = {},
     onBackClick: () -> Unit,
-    onClassClick: (VideoClassItem, Int) -> Unit
+    onClassClick: (VideoClassItem, Int) -> Unit,
+    onClassPdfClick: (VideoClassItem, Boolean) -> Unit // 👈 इन-ऐप PDF के लिए कॉलबैक
 ) {
     var classList by remember { mutableStateOf<List<VideoClassItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -601,11 +687,14 @@ private fun FirebaseVideoClassListScreen(
                     val id = child.key ?: ""
                     val title = child.child("title").getValue(String::class.java) ?: ""
 
-                    // 🎬 Firebase की किसी भी संभावित Key से लिंक फेच करने का कोड
                     val videoUrl = child.child("videoUrl").getValue(String::class.java)
                         ?: child.child("url").getValue(String::class.java)
                         ?: child.child("link").getValue(String::class.java)
                         ?: child.child("videourl").getValue(String::class.java)
+                        ?: ""
+
+                    val pdfUrl = child.child("pdfUrl").getValue(String::class.java)
+                        ?: child.child("pdf").getValue(String::class.java)
                         ?: ""
 
                     val status = child.child("status").getValue(String::class.java) ?: "COMING SOON"
@@ -617,7 +706,7 @@ private fun FirebaseVideoClassListScreen(
                         else -> 0
                     }
 
-                    list.add(VideoClassItem(id, title, videoUrl, status, order))
+                    list.add(VideoClassItem(id, title, videoUrl, pdfUrl, status, order))
                 }
                 classList = list.sortedBy { it.order }
                 isLoading = false
@@ -637,7 +726,7 @@ private fun FirebaseVideoClassListScreen(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = batchTitle)
+            HomeBrandHeader(badgeText = batchTitle, onNotificationClick = onNotificationClick)
         }
 
         item {
@@ -679,7 +768,8 @@ private fun FirebaseVideoClassListScreen(
                 VideoClassCardRow(
                     item = item,
                     isLocked = isLocked,
-                    onClick = { onClassClick(item, index) }
+                    onClick = { onClassClick(item, index) },
+                    onPdfClick = { onClassPdfClick(item, isLocked) }
                 )
             }
         }
@@ -695,7 +785,8 @@ private fun FirebaseVideoClassListScreen(
 private fun VideoClassCardRow(
     item: VideoClassItem,
     isLocked: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onPdfClick: () -> Unit = {}
 ) {
     val isLive = item.status.trim().uppercase() == "LIVE"
 
@@ -712,7 +803,7 @@ private fun VideoClassCardRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -723,7 +814,7 @@ private fun VideoClassCardRow(
                 Text(
                     text = if (isLive) "▶️" else "⏳",
                     fontSize = 20.sp,
-                    modifier = Modifier.padding(end = 12.dp)
+                    modifier = Modifier.padding(end = 10.dp)
                 )
                 Column {
                     Text(
@@ -735,33 +826,50 @@ private fun VideoClassCardRow(
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = if (isLive) "क्लिक करके वीडियो देखें" else "जल्द आ रही है",
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         color = Color(0xFF64748B)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
-            // 👉 स्टेटस के बगल में 🔒 लॉक
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 if (isLocked) {
-                    Text(
-                        text = "🔒",
-                        fontSize = 14.sp
-                    )
+                    Text(text = "🔒", fontSize = 14.sp)
+                }
+
+                if (item.pdfUrl.isNotBlank()) {
+                    Surface(
+                        modifier = Modifier.clickable { onPdfClick() },
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFFEFF6FF),
+                        border = BorderStroke(1.dp, Color(0xFF93C5FD))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📄 PDF",
+                                color = Color(0xFF1D4ED8),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = if (isLive) Color(0xFFDCFCE7) else Color(0xFFFEF9C3),
                     border = BorderStroke(1.dp, if (isLive) Color(0xFF86EFAC) else Color(0xFFFDE047))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (isLive) {
@@ -770,7 +878,7 @@ private fun VideoClassCardRow(
                                     .size(6.dp)
                                     .background(Color(0xFF15803D), CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(5.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                         }
                         Text(
                             text = if (isLive) "Live Now" else "Coming Soon",
@@ -789,6 +897,7 @@ private fun VideoClassCardRow(
 @Composable
 private fun TestsContent(
     innerPadding: PaddingValues,
+    onNotificationClick: () -> Unit = {},
     onOpenPage: (Int) -> Unit
 ) {
     LazyColumn(
@@ -799,7 +908,7 @@ private fun TestsContent(
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = "Online Mock Test Series")
+            HomeBrandHeader(badgeText = "Online Mock Test Series", onNotificationClick = onNotificationClick)
         }
 
         item {
@@ -974,6 +1083,7 @@ private fun CoursesContent(
 @Composable
 private fun HomeContent(
     innerPadding: PaddingValues,
+    onNotificationClick: () -> Unit = {},
     onOpenPage: (Int) -> Unit
 ) {
     val services = listOf(
@@ -988,7 +1098,9 @@ private fun HomeContent(
         modifier = Modifier.fillMaxSize().background(PageBackground).padding(innerPadding),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        item { HeaderSection() }
+        item {
+            HeaderSection(onNotificationClick = onNotificationClick)
+        }
 
         item {
             ServiceGrid(
@@ -1056,6 +1168,7 @@ private fun gsSubjects() = listOf(
 @Composable
 private fun GsSectionalContent(
     innerPadding: PaddingValues,
+    onNotificationClick: () -> Unit = {},
     onBack: () -> Unit,
     onSubjectClick: (GsSubject) -> Unit
 ) {
@@ -1066,7 +1179,7 @@ private fun GsSectionalContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = "सामान्य ज्ञान (TGT / PGT 2026)")
+            HomeBrandHeader(badgeText = "सामान्य ज्ञान (TGT / PGT 2026)", onNotificationClick = onNotificationClick)
         }
 
         item {
@@ -1225,6 +1338,7 @@ private fun SubjectTestsContent(
     subject: GsSubject,
     tests: List<PortalListItem>,
     hasAccess: Boolean = false,
+    onNotificationClick: () -> Unit = {},
     onBack: () -> Unit,
     onTestClick: (PortalListItem) -> Unit = {}
 ) {
@@ -1233,7 +1347,7 @@ private fun SubjectTestsContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = subject.title)
+            HomeBrandHeader(badgeText = subject.title, onNotificationClick = onNotificationClick)
         }
 
         item {
@@ -1271,7 +1385,7 @@ private fun AttractiveTestRow(
     isLocked: Boolean = false,
     onClick: () -> Unit = {}
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val isSubmitted = remember(item.testUrl) {
         QuizPersistentManager.init(context)
         item.testUrl.isNotBlank() && QuizPersistentManager.isSubmitted(item.testUrl)
@@ -1446,6 +1560,7 @@ private fun BatchPortalContent(
     title: String,
     subtitle: String,
     cards: List<PortalCardData>,
+    onNotificationClick: () -> Unit = {},
     onBack: () -> Unit,
     onOpenPage: (Int) -> Unit
 ) {
@@ -1454,7 +1569,7 @@ private fun BatchPortalContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = title)
+            HomeBrandHeader(badgeText = title, onNotificationClick = onNotificationClick)
         }
 
         cards.chunked(2).forEach { rowCards ->
@@ -1549,6 +1664,7 @@ private fun PortalListContent(
     subtitle: String,
     entries: List<PortalListItem>,
     hasAccess: Boolean = false,
+    onNotificationClick: () -> Unit = {},
     onBack: () -> Unit,
     onItemClick: (PortalListItem) -> Unit = {}
 ) {
@@ -1557,7 +1673,7 @@ private fun PortalListContent(
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
         item {
-            HomeBrandHeader(badgeText = headerBadge)
+            HomeBrandHeader(badgeText = headerBadge, onNotificationClick = onNotificationClick)
         }
 
         item {
@@ -1612,7 +1728,7 @@ private fun ProfileContent(
     hasFullBatch: Boolean,
     hasGs: Boolean
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val sharedPref = remember { context.getSharedPreferences("MedhaviUserProfile", android.content.Context.MODE_PRIVATE) }
 
     val auth = remember { com.google.firebase.auth.FirebaseAuth.getInstance() }
@@ -1674,6 +1790,19 @@ private fun ProfileContent(
                             .putString("user_city", userAddress)
                             .putString("user_target", userTargetExam)
                             .apply()
+
+                        val uid = firebaseUser?.uid
+                        if (uid != null) {
+                            val updates = mapOf<String, Any>(
+                                "name" to userName,
+                                "phone" to userPhone,
+                                "city" to userAddress
+                            )
+                            com.google.firebase.database.FirebaseDatabase.getInstance()
+                                .getReference("users")
+                                .child(uid)
+                                .updateChildren(updates)
+                        }
                     }
                     isEditing = !isEditing
                 }) {
@@ -1793,7 +1922,7 @@ private fun ProfileContent(
                     val googleClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
 
                     googleClient.signOut().addOnCompleteListener {
-                        android.widget.Toast.makeText(context, "सफलतापूर्वक लॉगआउट हो गया", android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "सफलतापूर्वक लॉगआउट हो गया", Toast.LENGTH_SHORT).show()
 
                         (context as? android.app.Activity)?.let { activity ->
                             val intent = activity.intent
@@ -1850,8 +1979,9 @@ private fun ProfileFieldItemRow(
     }
 }
 
+// 🔔 मुख्य हेडर सेक्शन (घंटी के साथ)
 @Composable
-private fun HeaderSection() {
+private fun HeaderSection(onNotificationClick: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1859,10 +1989,19 @@ private fun HeaderSection() {
                 color = RoyalBlue,
                 shape = RoundedCornerShape(bottomStart = 36.dp, bottomEnd = 36.dp)
             )
-            .padding(start = 20.dp, top = 25.dp, end = 20.dp, bottom = 35.dp),
-        contentAlignment = Alignment.Center
+            .padding(start = 20.dp, top = 25.dp, end = 20.dp, bottom = 35.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onNotificationClick,
+            modifier = Modifier.align(Alignment.TopEnd)
+        ) {
+            Text(text = "🔔", fontSize = 24.sp)
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             androidx.compose.foundation.Image(
                 painter = painterResource(id = R.drawable.logo),
                 contentDescription = "Medhavi Study Point Logo",
@@ -1891,8 +2030,12 @@ private fun HeaderSection() {
     }
 }
 
+// 🔔 सब-पेज का हेडर (घंटी के साथ)
 @Composable
-private fun HomeBrandHeader(badgeText: String) {
+private fun HomeBrandHeader(
+    badgeText: String,
+    onNotificationClick: () -> Unit = {}
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1900,10 +2043,19 @@ private fun HomeBrandHeader(badgeText: String) {
                 color = NavyBlue,
                 shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
             )
-            .padding(horizontal = 20.dp, vertical = 26.dp),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 20.dp, vertical = 26.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onNotificationClick,
+            modifier = Modifier.align(Alignment.TopEnd)
+        ) {
+            Text(text = "🔔", fontSize = 22.sp)
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(
                 "MEDHAVI STUDY POINT",
                 color = Golden,
