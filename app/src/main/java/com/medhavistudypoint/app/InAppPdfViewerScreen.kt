@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -56,7 +57,7 @@ fun InAppPdfViewerScreen(
             .fillMaxSize()
             .background(Color(0xFF082A66))
     ) {
-        // 🔙 टॉप हेडर बार (ऐप का अपना बार)
+        // 🔙 टॉप हेडर बार
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -76,7 +77,7 @@ fun InAppPdfViewerScreen(
             )
         }
 
-        // 📄 इन-ऐप PDF वेबव्यू कंटेनर
+        // 📄 इन-ऐप PDF वेबव्यू
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -105,9 +106,31 @@ fun InAppPdfViewerScreen(
                                 isLoading = true
                             }
 
+                            // 🔒 बाहर जाने या Sign In वाले पेज पर जाने से रोकें
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val destination = request?.url?.toString() ?: ""
+                                return if (!destination.contains("/preview")) {
+                                    true // क्लिक को ब्लॉक करें ताकि साइन इन पेज न खुले
+                                } else {
+                                    false
+                                }
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
+
+                                // 🎯 सिर्फ कोने वाले Pop-out/External Link बॉक्स को गायब करने के लिए
+                                val removePopoutScript = """
+                                    javascript:(function() {
+                                        var style = document.createElement('style');
+                                        style.type = 'text/css';
+                                        style.innerHTML = 'a[target="_blank"], [aria-label*="Pop-out"], [data-tooltip*="Pop-out"], .drive-viewer-popout-button { display: none !important; visibility: hidden !important; pointer-events: none !important; }';
+                                        (document.head || document.documentElement).appendChild(style);
+                                    })();
+                                """.trimIndent()
+
+                                view?.evaluateJavascript(removePopoutScript, null)
                             }
                         }
 

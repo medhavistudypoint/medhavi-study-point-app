@@ -6,6 +6,9 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -35,9 +38,13 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
@@ -65,7 +72,7 @@ data class LiveChatMessage(
 fun VideoPlayerScreen(
     videoTitle: String,
     videoUrl: String = "",
-    pdfUrl: String = "", // 👈 नया पैरामीटर: क्लास की PDF का लिंक
+    pdfUrl: String = "",
     onBackClick: () -> Unit,
     onNextVideoClick: () -> Unit
 ) {
@@ -133,7 +140,7 @@ fun VideoPlayerScreen(
     var isFullScreen by remember { mutableStateOf(false) }
 
     var isLeaderboardActiveOnScreen by remember { mutableStateOf(false) }
-    var studentScoreList = remember { mutableStateOf(listOf<StudentScoreModel>()) }
+    val studentScoreList = remember { mutableStateOf(listOf<StudentScoreModel>()) }
 
     var voteCounts by remember { mutableStateOf(mapOf(0 to 0, 1 to 0, 2 to 0, 3 to 0)) }
     var totalPollVotes by remember { mutableIntStateOf(0) }
@@ -145,14 +152,15 @@ fun VideoPlayerScreen(
     var messageInputText by remember { mutableStateOf("") }
     val chatListState = rememberLazyListState()
 
-    // 🆔 YouTube Video ID निकालने का तरीका
+    // 🆔 YouTube Video ID निकालने का सुरक्षित तरीका
     fun extractYouTubeId(url: String): String {
-        val trimmed = url.trim()
+        val clean = url.trim()
         return when {
-            trimmed.contains("youtu.be/") -> trimmed.substringAfter("youtu.be/").substringBefore("?").substringBefore("&")
-            trimmed.contains("v=") -> trimmed.substringAfter("v=").substringBefore("&")
-            trimmed.contains("live/") -> trimmed.substringAfter("live/").substringBefore("?").substringBefore("&")
-            trimmed.length == 11 && !trimmed.contains("/") -> trimmed
+            clean.contains("youtu.be/") -> clean.substringAfter("youtu.be/").substringBefore("?").substringBefore("&")
+            clean.contains("watch?v=") -> clean.substringAfter("watch?v=").substringBefore("&")
+            clean.contains("live/") -> clean.substringAfter("live/").substringBefore("?").substringBefore("&")
+            clean.contains("shorts/") -> clean.substringAfter("shorts/").substringBefore("?").substringBefore("&")
+            clean.length == 11 && !clean.contains("/") && !clean.contains(".") -> clean
             else -> ""
         }
     }
@@ -160,7 +168,29 @@ fun VideoPlayerScreen(
     val ytVideoId = remember(videoUrl) { extractYouTubeId(videoUrl) }
     val isYouTubeVideo = remember(videoUrl, ytVideoId) {
         val trimmed = videoUrl.trim()
-        !trimmed.contains("#exo") && (trimmed.contains("youtu.be") || trimmed.contains("youtube.com") || ytVideoId.length == 11)
+        !trimmed.contains("#exo") && (trimmed.contains("youtu.be") || trimmed.contains("youtube.com") || ytVideoId.isNotBlank())
+    }
+
+    // 📁 Google Drive चेक और उसका Iframe Preview URL
+    val isGoogleDriveVideo = remember(videoUrl) {
+        val trimmed = videoUrl.trim()
+        trimmed.contains("drive.google.com")
+    }
+
+    val drivePreviewUrl = remember(videoUrl) {
+        val trimmed = videoUrl.trim().replace("#exo", "")
+        if (trimmed.contains("drive.google.com")) {
+            val fileId = when {
+                trimmed.contains("/file/d/") -> trimmed.substringAfter("/file/d/").substringBefore("/")
+                trimmed.contains("id=") -> trimmed.substringAfter("id=").substringBefore("&")
+                else -> ""
+            }
+            if (fileId.isNotBlank()) {
+                "https://drive.google.com/file/d/$fileId/preview"
+            } else trimmed
+        } else {
+            trimmed
+        }
     }
 
     var ytPlayerInstance by remember { mutableStateOf<YouTubePlayer?>(null) }
@@ -181,53 +211,52 @@ fun VideoPlayerScreen(
         }
     }
 
-    fun formatDrivePlayableUrl(url: String): String {
-        if (url.contains("drive.google.com")) {
-            val fileId = when {
-                url.contains("/file/d/") -> url.substringAfter("/file/d/").substringBefore("/")
-                url.contains("id=") -> url.substringAfter("id=").substringBefore("&")
-                else -> ""
-            }
-            if (fileId.isNotBlank()) {
-                return "https://docs.google.com/uc?export=download&id=$fileId"
-            }
-        }
-        return url
-    }
-
     val loadControl = remember {
         DefaultLoadControl.Builder()
             .setBufferDurationsMs(2000, 15000, 1500, 2000)
             .build()
     }
 
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context)
-            .setLoadControl(loadControl)
-            .build()
+    val httpDataSourceFactory = remember {
+        DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+            .setUserAgent("Mozilla/5.0 (Android; Mobile)")
     }
 
-    // जब Google Drive या ExoPlayer का वीडियो बदले
-    LaunchedEffect(videoUrl, isYouTubeVideo) {
-        if (!isYouTubeVideo) {
-            val targetUrl = formatDrivePlayableUrl(videoUrl.trim().replace("#exo", ""))
+    val mediaSourceFactory = remember {
+        DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(httpDataSourceFactory)
+    }
+
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
+            .build().apply {
+                addListener(object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("EXO_ERROR", "ExoPlayer Error: ${error.errorCodeName} - ${error.message}")
+                    }
+                })
+            }
+    }
+
+    // जब ExoPlayer का डायरेक्ट वीडियो बदले
+    LaunchedEffect(videoUrl, isYouTubeVideo, isGoogleDriveVideo) {
+        if (!isYouTubeVideo && !isGoogleDriveVideo) {
+            val targetUrl = videoUrl.trim().replace("#exo", "")
             if (targetUrl.isNotBlank()) {
                 exoPlayer.stop()
                 exoPlayer.clearMediaItems()
-                exoPlayer.setMediaItem(MediaItem.fromUri(targetUrl))
+                exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(targetUrl)))
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
             }
         } else {
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
-        }
-    }
-
-    // जब YouTube का वीडियो बदले
-    LaunchedEffect(ytVideoId, ytPlayerInstance) {
-        if (isYouTubeVideo && ytVideoId.isNotBlank() && ytPlayerInstance != null) {
-            ytPlayerInstance?.loadVideo(ytVideoId, 0f)
         }
     }
 
@@ -249,7 +278,7 @@ fun VideoPlayerScreen(
                 teacherSelectedCorrectOption = correctOpt
                 isLeaderboardActiveOnScreen = showLeaderboard
 
-                if (!isAdmin && isLiveClassMode && syncTime > 0L && !isYouTubeVideo) {
+                if (!isAdmin && isLiveClassMode && syncTime > 0L && !isYouTubeVideo && !isGoogleDriveVideo) {
                     val currentPos = exoPlayer.currentPosition
                     if (kotlin.math.abs(currentPos - syncTime) > 5000L) {
                         exoPlayer.seekTo(syncTime)
@@ -296,7 +325,7 @@ fun VideoPlayerScreen(
     LaunchedEffect(isAdmin, isLiveClassMode) {
         if (isAdmin && isLiveClassMode) {
             while (true) {
-                if (!isYouTubeVideo && exoPlayer.isPlaying) {
+                if (!isYouTubeVideo && !isGoogleDriveVideo && exoPlayer.isPlaying) {
                     pollRef.child("currentPosition").setValue(exoPlayer.currentPosition)
                 }
                 delay(3000L)
@@ -365,15 +394,26 @@ fun VideoPlayerScreen(
         onDispose { studentScoresRef.removeEventListener(scoreListener) }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> exoPlayer.pause()
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> exoPlayer.stop()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             exoPlayer.release()
         }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(if (isFullScreen) Color.Black else pageBg)
+        modifier = Modifier
+            .fillMaxSize()
+            .background(if (isFullScreen) Color.Black else pageBg)
     ) {
         Box(
             modifier = Modifier
@@ -388,7 +428,9 @@ fun VideoPlayerScreen(
                     color = navyBlue
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(12.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
@@ -414,7 +456,9 @@ fun VideoPlayerScreen(
                                         shape = RoundedCornerShape(6.dp)
                                     ) {
                                         Row(
-                                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(8.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
@@ -431,7 +475,7 @@ fun VideoPlayerScreen(
                     }
                 }
             } else {
-                // 🔄 प्लेयर इंजन स्विच: YouTube (FrameLayout Fix) या ExoPlayer
+                // 🔄 प्लेयर इंजन: 1. YouTube, 2. Google Drive (Clean WebView), 3. ExoPlayer
                 if (isYouTubeVideo && ytVideoId.isNotBlank()) {
                     key(ytVideoId) {
                         AndroidView(
@@ -467,10 +511,94 @@ fun VideoPlayerScreen(
                                     }
                                     addView(ytView)
                                 }
+                            },
+                            onRelease = { frameLayout ->
+                                val ytView = frameLayout.getChildAt(0) as? YouTubePlayerView
+                                ytView?.let {
+                                    lifecycleOwner.lifecycle.removeObserver(it)
+                                    it.release()
+                                }
+                            }
+                        )
+                    }
+                } else if (isGoogleDriveVideo && drivePreviewUrl.isNotBlank()) {
+                    // 🚀 Google Drive के लिए कस्टमाइज्ड Clean WebView
+                    key(drivePreviewUrl) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                WebView(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                    settings.javaScriptEnabled = true
+                                    settings.domStorageEnabled = true
+                                    settings.mediaPlaybackRequiresUserGesture = false
+                                    settings.loadWithOverviewMode = true
+                                    settings.useWideViewPort = true
+                                    webChromeClient = WebChromeClient()
+
+                                    val hideExtraButtonsJs = """
+                                        javascript:(function() {
+                                            var styleId = 'drive-custom-hider';
+                                            if (!document.getElementById(styleId)) {
+                                                var css = `
+                                                    .ndfHFb-c4YZDc-Wrql6b, 
+                                                    .ndfHFb-c4YZDc-to915-LgbsSe, 
+                                                    .ndfHFb-c4YZDc-G0jgYd, 
+                                                    .drive-viewer-toolstrip,
+                                                    [aria-label*="Pop-out"],
+                                                    [aria-label*="Open in new window"],
+                                                    [aria-label*="अलग विंडो में खोलें"],
+                                                    [data-tooltip*="Pop-out"],
+                                                    .ndfHFb-c4YZDc-j7LFlb { 
+                                                        display: none !important; 
+                                                        visibility: hidden !important; 
+                                                        opacity: 0 !important;
+                                                        pointer-events: none !important; 
+                                                    }
+                                                `;
+                                                var style = document.createElement('style');
+                                                style.id = styleId;
+                                                style.type = 'text/css';
+                                                style.appendChild(document.createTextNode(css));
+                                                document.head.appendChild(style);
+                                            }
+                                        })()
+                                    """.trimIndent()
+
+                                    webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(
+                                            view: WebView?,
+                                            request: android.webkit.WebResourceRequest?
+                                        ): Boolean {
+                                            val targetUrl = request?.url?.toString() ?: ""
+                                            return !targetUrl.contains("/preview")
+                                        }
+
+                                        override fun onLoadResource(view: WebView?, url: String?) {
+                                            super.onLoadResource(view, url)
+                                            view?.loadUrl(hideExtraButtonsJs)
+                                        }
+
+                                        override fun onPageFinished(view: WebView?, url: String?) {
+                                            super.onPageFinished(view, url)
+                                            view?.loadUrl(hideExtraButtonsJs)
+                                        }
+                                    }
+                                    loadUrl(drivePreviewUrl)
+                                }
+                            },
+                            onRelease = { webView ->
+                                webView.stopLoading()
+                                webView.loadUrl("about:blank")
+                                webView.destroy()
                             }
                         )
                     }
                 } else {
+                    // डायरेक्ट MP4 लिंक्स के लिए ExoPlayer
                     AndroidView(
                         factory = { ctx ->
                             PlayerView(ctx).apply {
@@ -492,7 +620,7 @@ fun VideoPlayerScreen(
                 }
             }
 
-            // 🌟 फुल स्क्रीन में तैरता हुआ (Floating Overlay) पोल कार्ड
+            // 🌟 फुल स्क्रीन में तैरता हुआ पोल कार्ड
             if (isFullScreen && showPollToStudents) {
                 Box(
                     modifier = Modifier
@@ -524,7 +652,11 @@ fun VideoPlayerScreen(
         }
 
         if (!isFullScreen) {
-            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -542,7 +674,7 @@ fun VideoPlayerScreen(
                     }
                 }
 
-                // 📄 नया: क्लास नोट्स (PDF) बटन
+                // 📄 क्लास नोट्स (PDF) बटन
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     modifier = Modifier
@@ -620,7 +752,7 @@ fun VideoPlayerScreen(
                                         val nextMode = !isLiveClassMode
                                         pollRef.child("isLive").setValue(nextMode)
                                         if (nextMode) {
-                                            if (!isYouTubeVideo) {
+                                            if (!isYouTubeVideo && !isGoogleDriveVideo) {
                                                 pollRef.child("currentPosition").setValue(exoPlayer.currentPosition)
                                             }
                                         } else {
@@ -717,7 +849,9 @@ fun VideoPlayerScreen(
                                         val isChosen = teacherSelectedCorrectOption == i
                                         val optLetter = when(i) { 0 -> "A"; 1 -> "B"; 2 -> "C"; else -> "D" }
                                         Surface(
-                                            modifier = Modifier.size(30.dp).clickable { teacherSelectedCorrectOption = i },
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clickable { teacherSelectedCorrectOption = i },
                                             shape = CircleShape,
                                             color = if (isChosen) royalBlue else Color.White,
                                             border = BorderStroke(1.dp, royalBlue)
@@ -735,7 +869,9 @@ fun VideoPlayerScreen(
                                     OutlinedTextField(
                                         value = customTimeInput,
                                         onValueChange = { customTimeInput = it },
-                                        modifier = Modifier.width(75.dp).height(46.dp),
+                                        modifier = Modifier
+                                            .width(75.dp)
+                                            .height(46.dp),
                                         singleLine = true,
                                         shape = RoundedCornerShape(8.dp)
                                     )
@@ -748,7 +884,9 @@ fun VideoPlayerScreen(
                                     val newLeaderboardState = !isLeaderboardActiveOnScreen
                                     pollRef.child("showLeaderboard").setValue(newLeaderboardState)
                                 },
-                                modifier = Modifier.fillMaxWidth().height(34.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(34.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = if (isLeaderboardActiveOnScreen) Color(0xFFDC2626) else royalBlue),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(vertical = 4.dp)
@@ -792,7 +930,9 @@ fun VideoPlayerScreen(
                         shape = RoundedCornerShape(12.dp),
                         elevation = CardDefaults.cardElevation(2.dp)
                     ) {
-                        Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                        Column(modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -809,12 +949,16 @@ fun VideoPlayerScreen(
 
                             LazyColumn(
                                 state = chatListState,
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 if (chatMessages.isEmpty()) {
                                     item {
-                                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                        Box(modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp), contentAlignment = Alignment.Center) {
                                             Text("अभी कोई प्रश्न नहीं है। अपना सवाल पूछें...", fontSize = 12.sp, color = Color.Gray)
                                         }
                                     }
@@ -867,7 +1011,9 @@ fun VideoPlayerScreen(
                             }
 
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedTextField(
@@ -879,7 +1025,9 @@ fun VideoPlayerScreen(
                                             fontSize = 12.sp
                                         )
                                     },
-                                    modifier = Modifier.weight(1f).height(46.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp),
                                     singleLine = true,
                                     shape = RoundedCornerShape(8.dp)
                                 )
@@ -922,7 +1070,9 @@ fun VideoPlayerScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     OutlinedButton(
                         onClick = onBackClick,
-                        modifier = Modifier.weight(1f).height(44.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text("← वापस जाएँ")
@@ -930,7 +1080,9 @@ fun VideoPlayerScreen(
                     Spacer(modifier = Modifier.width(14.dp))
                     Button(
                         onClick = onNextVideoClick,
-                        modifier = Modifier.weight(1f).height(44.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = navyBlue),
                         shape = RoundedCornerShape(10.dp)
                     ) {
@@ -1056,19 +1208,30 @@ fun StudentLockedPollView(
                             val userScorePath = studentScoresRef.child(userId.replace(".", "_"))
                             userScorePath.child("name").setValue(userName)
                             userScorePath.child("email").setValue(userEmail)
-                            userScorePath.get().addOnSuccessListener { snapshot ->
-                                val currentCorrect = snapshot.child("correctCount").getValue(Long::class.java)?.toInt() ?: 0
-                                val currentIncorrect = snapshot.child("incorrectCount").getValue(Long::class.java)?.toInt() ?: 0
+                            userScorePath.runTransaction(object : com.google.firebase.database.Transaction.Handler {
+                                override fun doTransaction(currentData: com.google.firebase.database.MutableData): com.google.firebase.database.Transaction.Result {
+                                    val curCorrect = currentData.child("correctCount").getValue(Long::class.java) ?: 0L
+                                    val curIncorrect = currentData.child("incorrectCount").getValue(Long::class.java) ?: 0L
 
-                                if (isCorrect) {
-                                    userScorePath.child("correctCount").setValue(currentCorrect + 1)
-                                } else {
-                                    userScorePath.child("incorrectCount").setValue(currentIncorrect + 1)
+                                    if (isCorrect) {
+                                        currentData.child("correctCount").value = curCorrect + 1
+                                    } else {
+                                        currentData.child("incorrectCount").value = curIncorrect + 1
+                                    }
+                                    return com.google.firebase.database.Transaction.success(currentData)
                                 }
-                            }
+
+                                override fun onComplete(error: DatabaseError?, committed: Boolean, currentData: DataSnapshot?) {
+                                    if (error != null) {
+                                        Log.e("ScoreTransaction", "Failed: ${error.message}")
+                                    }
+                                }
+                            })
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(38.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF082A66)),
                     shape = RoundedCornerShape(8.dp),
                     enabled = selectedIndex != null

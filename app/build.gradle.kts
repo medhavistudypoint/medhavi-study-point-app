@@ -60,7 +60,6 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
@@ -69,4 +68,6 @@ dependencies {
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.1")
     // 🔔 Firebase Cloud Messaging (Push Notifications)
     implementation("com.google.firebase:firebase-messaging:24.0.0")
+    // Google Drive और नेटवर्क स्ट्रीमिंग के लिए
+    implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
 }
